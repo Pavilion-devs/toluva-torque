@@ -48,6 +48,17 @@ Torque MCP setup notes live in `docs/torque-mcp-runbook.md`.
 npm run build
 ```
 
+## Deploy Frontend
+
+The app is a Vite SPA. `vercel.json` rewrites client routes such as `/dashboard`, `/launches`, and `/campaigns` back to `index.html` so direct refreshes do not 404.
+
+Vercel settings:
+
+- Framework preset: `Vite`
+- Install command: `npm install`
+- Build command: `npm run build`
+- Output directory: `dist`
+
 ## Integration Targets
 
 - Raydium LaunchLab devnet token launch flow.
