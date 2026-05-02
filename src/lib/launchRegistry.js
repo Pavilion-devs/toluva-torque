@@ -1,7 +1,7 @@
 import React from "react";
 import fallbackRegistry from "../../data/launch-registry.json";
 
-const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787";
+const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "";
 const listeners = new Set();
 
 let registryState = {
@@ -46,6 +46,10 @@ export async function refreshRegistry({ force = false } = {}) {
   setRegistryState({ loading: true, error: null });
 
   try {
+    if (!apiBaseUrl) {
+      throw new Error("Registry API not configured.");
+    }
+
     const response = await fetch(`${apiBaseUrl}/api/registry`, {
       headers: { Accept: "application/json" },
     });
