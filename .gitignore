@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.mcp.json
+.claude-mcp.json
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Scratch/research artifacts kept out of the public project repo.
+brainstorm-*.md
+raydium-launchlab-torque-research-*.md
+reference-board.md
+track-fit-analysis-*.html
+scrape-aura.js
+skills-lock.json
+tools/

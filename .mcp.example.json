@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "torque": {
+      "command": "npx",
+      "args": [
+        "@torque-labs/mcp"
+      ],
+      "env": {
+        "TORQUE_API_KEY": "your-mcp-token"
+      }
+    }
+  }
+}

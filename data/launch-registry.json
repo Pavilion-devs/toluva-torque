@@ -1,0 +1,288 @@
+{
+  "workspace": {
+    "name": "Toluva Studio",
+    "cluster": "devnet",
+    "rpcEndpoint": "https://api.devnet.solana.com",
+    "defaultRewardAsset": "SOL",
+    "publicProfileUrl": "toluva.xyz/u/tomicreator"
+  },
+  "launches": [
+    {
+      "sym": "OKRA",
+      "name": "Okra Protocol",
+      "status": "bonding",
+      "bonded": 82,
+      "campaign": "Early Buyer",
+      "buyers": 142,
+      "pool": "3.4 SOL",
+      "age": "2h ago",
+      "migrationTime": "T-3h 48m",
+      "migrationState": "sprinting"
+    },
+    {
+      "sym": "VERDE",
+      "name": "Verde Capital",
+      "status": "bonding",
+      "bonded": 78,
+      "campaign": "Migration Sprint",
+      "buyers": 98,
+      "pool": "2.4 SOL",
+      "age": "5h ago",
+      "migrationTime": "T-4h 12m",
+      "migrationState": "sprinting"
+    },
+    {
+      "sym": "HOTSOL",
+      "name": "Hot Solana",
+      "status": "migrated",
+      "bonded": 100,
+      "campaign": "Referral Raffle",
+      "buyers": 311,
+      "pool": "5.0 SOL",
+      "age": "1d ago",
+      "migrationTime": "Migrated",
+      "migrationState": "migrated"
+    },
+    {
+      "sym": "NEBL",
+      "name": "Nebula",
+      "status": "bonding",
+      "bonded": 58,
+      "campaign": "Early Buyer",
+      "buyers": 71,
+      "pool": "1.8 SOL",
+      "age": "12h ago",
+      "migrationTime": "T-9h 18m",
+      "migrationState": "bonding"
+    },
+    {
+      "sym": "WAVE",
+      "name": "Wave Foundation",
+      "status": "migrating",
+      "bonded": 95,
+      "campaign": "Migration Sprint",
+      "buyers": 168,
+      "pool": "4.0 SOL",
+      "age": "3d ago",
+      "migrationTime": "T-1h 24m",
+      "migrationState": "migrating"
+    },
+    {
+      "sym": "LCAT",
+      "name": "Laser Cat",
+      "status": "bonding",
+      "bonded": 22,
+      "campaign": null,
+      "buyers": 38,
+      "pool": null,
+      "age": "6h ago",
+      "migrationTime": "T-1d 2h",
+      "migrationState": "bonding"
+    },
+    {
+      "sym": "POLY",
+      "name": "PolyDrop",
+      "status": "draft",
+      "bonded": 0,
+      "campaign": null,
+      "buyers": 0,
+      "pool": null,
+      "age": "Draft",
+      "migrationTime": "Draft",
+      "migrationState": "draft"
+    },
+    {
+      "sym": "ZIG",
+      "name": "ZigZag DAO",
+      "status": "draft",
+      "bonded": 0,
+      "campaign": null,
+      "buyers": 0,
+      "pool": null,
+      "age": "Draft",
+      "migrationTime": "Draft",
+      "migrationState": "draft"
+    }
+  ],
+  "campaigns": [
+    {
+      "id": 1,
+      "type": "Early Buyer",
+      "launch": "OKRA",
+      "status": "ended",
+      "pool": "3.4",
+      "paid": "2.8",
+      "progress": 100,
+      "info": "12 wallets paid out",
+      "state": "Ended 2d ago",
+      "accent": "pink"
+    },
+    {
+      "id": 2,
+      "type": "Referral Raffle",
+      "launch": "VERDE",
+      "status": "live",
+      "pool": "1.5",
+      "paid": "0.0",
+      "progress": 64,
+      "info": "8 valid referrers · 12 tickets",
+      "state": "Draw in 2h 14m",
+      "accent": "violet"
+    },
+    {
+      "id": 3,
+      "type": "Migration Sprint",
+      "launch": "VERDE",
+      "status": "live",
+      "pool": "2.4",
+      "paid": "0.0",
+      "progress": 78,
+      "info": "38 sprinting · 78% to threshold",
+      "state": "Closes in 4h 12m",
+      "accent": "indigo"
+    },
+    {
+      "id": 4,
+      "type": "Early Buyer",
+      "launch": "NEBL",
+      "status": "scheduled",
+      "pool": "1.8",
+      "paid": "0.0",
+      "progress": 0,
+      "info": "Starts at launch open",
+      "state": "T-18m",
+      "accent": "pink"
+    },
+    {
+      "id": 5,
+      "type": "Referral Raffle",
+      "launch": "NEBL",
+      "status": "live",
+      "pool": "0.8",
+      "paid": "0.0",
+      "progress": 12,
+      "info": "12 clicks · 4 conversions",
+      "state": "Closes in 1d 3h",
+      "accent": "violet"
+    },
+    {
+      "id": 6,
+      "type": "Migration Sprint",
+      "launch": "WAVE",
+      "status": "ended",
+      "pool": "4.0",
+      "paid": "4.0",
+      "progress": 100,
+      "info": "12 sprinters paid · WAVE migrated",
+      "state": "Ended 1d ago",
+      "accent": "indigo"
+    }
+  ],
+  "liveEvents": [
+    {
+      "type": "claim",
+      "icon": "solar:cup-star-bold",
+      "token": "OKRA",
+      "time": "12s ago",
+      "line": [
+        { "text": "0xab2…fe19", "className": "font-mono" },
+        { "text": " claimed " },
+        { "text": "0.42 SOL", "className": "font-semibold text-slate-900" }
+      ]
+    },
+    {
+      "type": "raffle",
+      "icon": "solar:ticket-bold",
+      "token": "VERDE",
+      "time": "28s ago",
+      "line": [
+        { "text": "0x9c4…01a3", "className": "font-mono" },
+        { "text": " joined the " },
+        { "text": "referral raffle", "className": "font-semibold text-slate-900" }
+      ]
+    },
+    {
+      "type": "threshold",
+      "icon": "solar:rocket-bold",
+      "token": null,
+      "time": "1m ago",
+      "line": [
+        { "text": "$WAVE", "className": "font-semibold text-slate-900" },
+        { "text": " crossed migration threshold" }
+      ]
+    },
+    {
+      "type": "payout",
+      "icon": "solar:dollar-bold",
+      "token": "NEBL",
+      "time": "2m ago",
+      "line": [
+        { "text": "0x71f…cc02", "className": "font-mono" },
+        { "text": " paid out " },
+        { "text": "0.18 SOL", "className": "font-semibold text-slate-900" }
+      ]
+    },
+    {
+      "type": "raffle",
+      "icon": "solar:ticket-bold",
+      "token": "NEBL",
+      "time": "3m ago",
+      "line": [
+        { "text": "+12 tickets", "className": "font-semibold text-slate-900" },
+        { "text": " sold for raffle" }
+      ]
+    },
+    {
+      "type": "sprint",
+      "icon": "solar:bolt-bold",
+      "token": "VERDE",
+      "time": "4m ago",
+      "line": [
+        { "text": "0x55a…b09e", "className": "font-mono" },
+        { "text": " sprinted " },
+        { "text": "0.6 SOL", "className": "font-semibold text-slate-900" }
+      ]
+    },
+    {
+      "type": "settled",
+      "icon": "solar:medal-ribbon-star-bold",
+      "token": "OKRA",
+      "time": "5m ago",
+      "line": [
+        { "text": "Top 10", "className": "font-semibold text-slate-900" },
+        { "text": " settled · 12 wallets paid" }
+      ]
+    },
+    {
+      "type": "claim",
+      "icon": "solar:cup-star-bold",
+      "token": "OKRA",
+      "time": "6m ago",
+      "line": [
+        { "text": "0x84d…7f12", "className": "font-mono" },
+        { "text": " first-buy locked" }
+      ]
+    }
+  ],
+  "analytics": {
+    "stats": [
+      { "label": "Buy volume (7d)", "value": "284", "unit": "SOL", "delta": "+12.4%", "positive": true },
+      { "label": "Unique buyers (7d)", "value": "1,409", "unit": "wallets", "delta": "+184", "positive": true },
+      { "label": "Referral conversion", "value": "38.2", "unit": "%", "delta": "+4.1%", "positive": true },
+      { "label": "Avg. time to migrate", "value": "3.2", "unit": "days", "delta": "-0.8d", "positive": true }
+    ],
+    "topLaunches": [
+      { "sym": "HOTSOL", "metric": "311 buyers · 5.0 SOL pool", "pct": 100 },
+      { "sym": "WAVE", "metric": "168 buyers · 95% migrated", "pct": 95 },
+      { "sym": "OKRA", "metric": "142 buyers · bonded 82%", "pct": 82 },
+      { "sym": "VERDE", "metric": "98 buyers · bonded 78%", "pct": 78 }
+    ],
+    "templateConversion": [
+      { "name": "Early Buyer Leaderboard", "conv": 84, "color": "#ec4899" },
+      { "name": "Migration Sprint", "conv": 71, "color": "#6366f1" },
+      { "name": "Referral Raffle", "conv": 38, "color": "#7c3aed" }
+    ]
+  },
+  "eventReceipts": [],
+  "campaignResults": []
+}
