@@ -1,13 +1,10 @@
 {
   "mcpServers": {
     "torque": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "@torque-labs/mcp"
-      ],
-      "env": {
-        "TORQUE_API_KEY": "your-mcp-token"
-      }
+        "server/torque-mcp-wrapper.js"
+      ]
     }
   }
 }

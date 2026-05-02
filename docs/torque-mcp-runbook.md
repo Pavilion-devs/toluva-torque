@@ -33,7 +33,13 @@ Torque docs show this install pattern:
 claude mcp add torque -e TORQUE_API_KEY=your-mcp-token -- npx @torque-labs/mcp@latest
 ```
 
-This repo also includes `.mcp.example.json` with the same shape but no secret value.
+For this repo, prefer the local wrapper so the token stays in `.env` and does not get copied into client config:
+
+```bash
+codex mcp add torque -- node /absolute/path/to/server/torque-mcp-wrapper.js
+```
+
+This repo also includes `.mcp.example.json` with the same wrapper shape and no secret value.
 
 After connection:
 
