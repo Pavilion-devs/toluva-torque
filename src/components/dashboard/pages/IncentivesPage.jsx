@@ -10,7 +10,6 @@ const templates = [
     accent: "pink",
     summary: "Top buyers in the first window split a fixed pool the moment your launch closes.",
     metrics: ["Top N wallets ranked by buy volume", "Auto-paid by Torque", "Configurable cutoff window"],
-    sample: "12 wallets paid out · 3.4 SOL pool",
   },
   {
     id: "referral-raffle",
@@ -20,7 +19,6 @@ const templates = [
     accent: "violet",
     summary: "Each holder gets a referral link. Qualified referrals earn raffle tickets. Torque draws and pays winners.",
     metrics: ["Per-wallet referral links", "Raffle entries on qualified buys", "Auto-draw at end of window"],
-    sample: "8 valid referrers · raffle in 2h",
   },
   {
     id: "migration-sprint",
@@ -30,7 +28,6 @@ const templates = [
     accent: "indigo",
     summary: "Reward the wallets that push the bonding curve over its migration threshold before deadline.",
     metrics: ["Leaderboard around graduation", "Triggers on threshold hit", "Pays sprinters automatically"],
-    sample: "38 sprinting · 78% to threshold",
   },
 ];
 
@@ -119,16 +116,6 @@ function TemplateCard({ t }) {
             </li>
           ))}
         </ul>
-
-        <div
-          className="mt-6 flex items-center gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 font-mono text-[11.5px] text-slate-500"
-          style={{ border: "1px solid var(--line)" }}
-        >
-          <svg width={13} height={13} viewBox="0 0 24 24" fill="none">
-            <path d="M3 12h18M3 6h18M3 18h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-          {t.sample}
-        </div>
 
         <div className="mt-auto flex items-center gap-3 pt-6">
           <button

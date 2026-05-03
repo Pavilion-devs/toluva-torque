@@ -69,6 +69,17 @@ function ActivityPill({ event }) {
 }
 
 function LiveActivityTicker({ events }) {
+  if (events.length === 0) {
+    return (
+      <div className="card" style={{ padding: 28 }}>
+        <div className="text-[15px] font-bold tracking-tight text-slate-900">Live activity</div>
+        <div className="mt-2 text-[13px] text-slate-500">
+          No Torque event receipts recorded by the local API yet.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="card"

@@ -76,8 +76,8 @@ function LaunchMockup() {
         </div>
         <div className="flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-slate-900">Okra</span>
-            <span className="text-[11px] font-mono text-slate-400">OKRA</span>
+            <span className="text-sm font-semibold text-slate-900">New token</span>
+            <span className="text-[11px] font-mono text-slate-400">TOKEN</span>
           </div>
           <div className="mt-1.5 h-1.5 w-3/4 rounded-full bg-slate-100">
             <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-pink-500 to-rose-400" />
@@ -159,7 +159,7 @@ function TrackMockup() {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <div className="text-[11px] font-medium text-slate-400">Live leaderboard</div>
-          <div className="text-sm font-semibold text-slate-900">VERDE · early buyers</div>
+          <div className="text-sm font-semibold text-slate-900">TOKEN · early buyers</div>
         </div>
         <span className="flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-600 ring-1 ring-indigo-100">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />

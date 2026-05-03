@@ -58,7 +58,7 @@ function EarlyBuyerCard() {
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/92 shadow-[0_18px_45px_rgba(15,23,42,0.07)] backdrop-blur-md">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <span className="font-mono text-[11px] uppercase tracking-wider text-slate-400">
-                Top 10 · OKRA
+                Top 10 · TOKEN
               </span>
               <span className="rounded-full bg-pink-50 px-2.5 py-0.5 text-[10px] font-semibold text-pink-600 ring-1 ring-pink-100">
                 3.4 SOL pool
@@ -144,7 +144,7 @@ function ReferralRaffleCard() {
           <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/92 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.07)] backdrop-blur-md">
             <div className="mb-3 flex items-center justify-between">
               <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                Raffle entries · VERDE
+                Raffle entries · TOKEN
               </span>
               <span className="flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-0.5 text-[10px] font-semibold text-violet-600 ring-1 ring-violet-100">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
@@ -216,7 +216,7 @@ function MigrationSprintCard() {
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
               <div>
                 <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                  Bonding curve · VERDE
+                  Bonding curve · TOKEN
                 </div>
                 <div className="mt-0.5 text-sm font-semibold text-slate-900">
                   78% to migration

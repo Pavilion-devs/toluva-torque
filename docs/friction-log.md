@@ -5,11 +5,11 @@ This file tracks anything that slows down the Raydium LaunchLab or Torque integr
 ## Open
 
 - Raydium reference clones named in `plan.md` are not currently present in `/tmp`: `/tmp/raydium-sdk-V2-demo` and `/tmp/raydium-sdk-V2`.
-- Raydium SDK dependencies are not installed yet, so LaunchLab routes currently stop at config/status/transaction-prep instead of building signed transactions.
+- Raydium LaunchLab browser signing/submission is wired; next step is running it with a funded injected devnet wallet.
+- Dashboard registry pages now start from an empty local API registry. Tables and analytics derive from real local API launch records, Torque event receipts, and Raydium pool IDs only.
 - Claim/leaderboard data source still needs confirmation: public landing-page endpoints where possible, backend-authenticated calls where required.
-- Torque recurring incentive creation flow still needs MCP/API confirmation beyond custom event ingestion.
-- Current Codex session has no callable Torque MCP resources/templates even after discovery. Need `TORQUE_API_TOKEN` and MCP server configuration, or confirmation from Torque on how to expose the tools here.
-- Torque ingester rejected `token_launch_created` with `Event not found for this API key`, which confirms custom event schema creation/attachment must happen before ingestion succeeds.
+- Torque recurring incentive creation preview works through MCP. Real creation/funding still needs explicit operator confirmation.
+- Torque custom-event fields are required at ingestion time and custom events allow at most 5 string fields. The local catalog now validates this before ingest.
 
 ## Resolved
 
@@ -17,4 +17,22 @@ This file tracks anything that slows down the Raydium LaunchLab or Torque integr
 - Local API + file-backed registry exists, so Raydium and Torque integration can plug into backend-owned routes instead of browser-only static data.
 - Torque custom event ingestion is wired behind `POST /api/events`; missing credentials degrade to local receipts instead of blocking dashboard development.
 - Torque event request serializer now flattens primitive event fields directly under `data`, matching the ingestion API shape.
+- Torque MCP works locally through `server/torque-mcp-wrapper.js` after logging in with `TORQUE_MCP_API_KEY`. The wrapper uses `npx --yes @torque-labs/mcp@latest` so it does not hang on an install prompt.
+- Toluva project is selected in Torque: `cmoom7gr80030jr1inh1hm91l`.
+- Created, attached, and seeded all 10 Torque custom events through `POST /api/events`; Torque returned `202 ACCEPTED` receipts. First-buy query preview returned wallet `44444444444444444444444444444444` with value `42.5`.
+- Local `/api/events` schema validation rejects incomplete events before Torque ingest; `reward_claimed` without `tx_signature` returns `400`.
+- Fixed `reward_claimed` to fit Torque's 5-string-field cap by dropping `claim_id` and keeping `tx_signature`.
+- Previewed `Toluva Early Buyer Leaderboard Proof`: 0.1 SOL distribution pool, 1 weekly epoch starting `2026-05-04T00:00:00.000Z`, `first_buy_completed` event source, rank formula `RANK == 1 ? TOTAL_REWARD_POOL * 0.3 : RANK <= 3 ? TOTAL_REWARD_POOL * 0.15 : RANK <= 10 ? TOTAL_REWARD_POOL * 0.4 / 7 : 0`. Torque preview displayed protocol fee `+0.01` and total pay `0.11`.
+- Raydium SDK dependencies are installed: `@raydium-io/raydium-sdk-v2`, `@solana/web3.js`, and `@solana/spl-token`.
 - Raydium LaunchLab program IDs and launch-prep parameters are backend-configurable; current docs default devnet to `DRay6fNdQ5J82H7xV6uq2aV3mNrUZ1J4PgSKsWgptcm6`.
+- Verified Raydium devnet LaunchLab accounts exist: platform `2Jx4KTDrVSdWNazuGpcA8n3ZLTRGGBDxAWhuKe2Xcj2a`, config `7ZR4zD7PYfY2XxoG1Gxcy2EgEeGYrpxrwzPuwdUBssEt`.
+- Added `POST /api/raydium/launches/transaction-plan` to validate LaunchLab raw-unit inputs and derive `auth`, `poolId`, `vaultA`, `vaultB`, and `configId` while keeping creator/mint private keys client-side.
+- Added `POST /api/raydium/launches/build-transaction`; SDK verification produced one unsigned base64 V0 transaction with creator wallet and mint public key as required signers.
+- Added dashboard `/dashboard/launches` signing flow: the browser generates the mint keypair, signs the transaction with that mint keypair, asks the injected wallet for the creator signature, submits to devnet, records the launch, and emits `token_launch_created`.
+- `GET /api/raydium/launchlab/status?poolId=...` now attempts live LaunchLab pool decoding from the configured RPC.
+- `New launch` no longer toggles the form closed when clicked repeatedly; the form has an explicit `Close` button, submission state, and a clear demo-wallet warning.
+- Dashboard chrome now shows `API data` versus `API offline`, and Launches shows whether it is using the local API file registry.
+- Removed the seeded demo launches/campaigns/activity/analytics from `data/launch-registry.json`; `npm run dev` now starts API + web together.
+- Phantom blocked the first LaunchLab signing attempt because simulation failed before wallet signing. Reproducing the generated transaction against devnet showed `AccountNotFound` when the fee-payer wallet has no devnet account/SOL. Added frontend preflight to check devnet wallet existence, minimum devnet SOL, and transaction simulation before opening Phantom.
+- Runtime registry now defaults to ignored `data/local-launch-registry.json`; committed `data/launch-registry.json` stays empty. The first successful devnet proof is documented in `docs/devnet-proof.md`.
+- Added Raydium buy transaction builder plus Launches-table `Buy 0.01 SOL` action. Successful buys submit to devnet and emit `first_buy_completed`/`buy_completed` through Torque.

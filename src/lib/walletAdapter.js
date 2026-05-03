@@ -8,6 +8,10 @@ function getProvider() {
   return window.solana || null;
 }
 
+export function getInjectedWalletProvider() {
+  return getProvider();
+}
+
 function providerName(provider) {
   if (!provider) return "Demo wallet";
   if (provider.isPhantom) return "Phantom";

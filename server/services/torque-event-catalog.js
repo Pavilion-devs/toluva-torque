@@ -52,8 +52,6 @@ export const torqueEventSchemas = [
       { fieldName: "amount", type: "number", label: "Buy Amount" },
       { fieldName: "amount_usd", type: "number", label: "Buy Amount USD" },
       { fieldName: "tx_signature", type: "string", label: "Transaction Signature" },
-      { fieldName: "referral_code", type: "string", label: "Referral Code" },
-      { fieldName: "referrer", type: "string", label: "Referrer Wallet" },
     ],
   },
   {
@@ -111,9 +109,45 @@ export const torqueEventSchemas = [
       { fieldName: "token", type: "string", label: "Token Symbol" },
       { fieldName: "launch_id", type: "string", label: "Launch ID" },
       { fieldName: "campaign_id", type: "string", label: "Campaign ID" },
-      { fieldName: "claim_id", type: "string", label: "Claim ID" },
       { fieldName: "reward_amount", type: "number", label: "Reward Amount" },
       { fieldName: "tx_signature", type: "string", label: "Transaction Signature" },
     ],
   },
 ];
+
+export const TORQUE_MAX_STRING_FIELDS = 5;
+
+export function getTorqueEventSchema(eventName) {
+  return torqueEventSchemas.find((schema) => schema.eventName === eventName) || null;
+}
+
+export function getTorqueEventCatalogIssues() {
+  return torqueEventSchemas.flatMap((schema) => {
+    const issues = [];
+    const stringFieldCount = schema.fields.filter((field) => field.type === "string").length;
+    const fieldNames = new Set();
+
+    if (stringFieldCount > TORQUE_MAX_STRING_FIELDS) {
+      issues.push({
+        eventName: schema.eventName,
+        code: "too_many_string_fields",
+        message: `${schema.eventName} has ${stringFieldCount} string fields; Torque allows ${TORQUE_MAX_STRING_FIELDS}.`,
+      });
+    }
+
+    for (const field of schema.fields) {
+      if (fieldNames.has(field.fieldName)) {
+        issues.push({
+          eventName: schema.eventName,
+          code: "duplicate_field",
+          fieldName: field.fieldName,
+          message: `${schema.eventName} declares ${field.fieldName} more than once.`,
+        });
+      }
+
+      fieldNames.add(field.fieldName);
+    }
+
+    return issues;
+  });
+}

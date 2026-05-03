@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "api": "node server/index.js",
-    "dev": "vite",
+    "dev": "node server/dev-all.js",
     "dev:all": "node server/dev-all.js",
     "dev:web": "vite",
     "build": "vite build",

@@ -17,6 +17,16 @@ const RAYDIUM_LAUNCHPAD_PROGRAM = {
   devnet: "DRay6fNdQ5J82H7xV6uq2aV3mNrUZ1J4PgSKsWgptcm6",
 };
 
+const RAYDIUM_LAUNCHPAD_PLATFORM = {
+  mainnet: "4Bu96XjU84XjPDSpveTVf6LYGCkfW5FK7SNkREWcEfV4",
+  devnet: "2Jx4KTDrVSdWNazuGpcA8n3ZLTRGGBDxAWhuKe2Xcj2a",
+};
+
+const RAYDIUM_LAUNCHPAD_CONFIG = {
+  mainnet: "6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX",
+  devnet: "7ZR4zD7PYfY2XxoG1Gxcy2EgEeGYrpxrwzPuwdUBssEt",
+};
+
 function firstSet(...values) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
 }
@@ -40,7 +50,8 @@ export const config = {
   registry: {
     path: process.env.TOLUVA_REGISTRY_PATH
       ? path.resolve(process.env.TOLUVA_REGISTRY_PATH)
-      : path.join(projectRoot, "data", "launch-registry.json"),
+      : path.join(projectRoot, "data", "local-launch-registry.json"),
+    seedPath: path.join(projectRoot, "data", "launch-registry.json"),
   },
   torque: {
     eventApiKey: firstSet(process.env.TORQUE_EVENT_API_KEY, process.env.TORQUE_API_KEY),
@@ -70,6 +81,8 @@ config.raydium = {
     RAYDIUM_LAUNCHPAD_PROGRAM[raydiumCluster],
   ),
   platformId: firstSet(process.env.RAYDIUM_PLATFORM_ID),
+  configId: firstSet(process.env.RAYDIUM_CONFIG_ID, RAYDIUM_LAUNCHPAD_CONFIG[raydiumCluster]),
+  defaultPlatformId: RAYDIUM_LAUNCHPAD_PLATFORM[raydiumCluster],
   quoteMint: firstSet(process.env.RAYDIUM_QUOTE_MINT),
   curveType: numberFromEnv(process.env.RAYDIUM_CURVE_TYPE, 0),
   configIndex: numberFromEnv(process.env.RAYDIUM_CONFIG_INDEX, 0),
@@ -93,12 +106,13 @@ export function integrationReadiness() {
     raydium: {
       cluster: config.raydium.cluster,
       launchpadProgramId: config.raydium.launchpadProgramId,
-      platformId: config.raydium.platformId || null,
+      platformId: config.raydium.platformId || config.raydium.defaultPlatformId || null,
+      configId: config.raydium.configId || null,
       quoteMint: config.raydium.quoteMint || null,
       curveType: config.raydium.curveType,
       configIndex: config.raydium.configIndex,
       sdkPackage: config.raydium.sdkPackage,
-      readyForTransactionBuild: Boolean(config.raydium.launchpadProgramId),
+      readyForTransactionBuild: Boolean(config.raydium.launchpadProgramId && (config.raydium.platformId || config.raydium.defaultPlatformId)),
     },
   };
 }

@@ -103,8 +103,13 @@ function NavLink({ href, label, icon, badge, active }) {
 
 export default function DashboardLayout({ pathname, children }) {
   const wallet = useWallet();
-  const { registry } = useRegistry();
+  const { registry, source, error } = useRegistry();
   const workspace = registry.workspace;
+  const dataSourceLabel = source === "api" ? "API data" : "API offline";
+  const dataSourceTitle =
+    source === "api"
+      ? "Dashboard data is loaded from the local API file registry."
+      : error || "Dashboard is empty because the local API is unavailable.";
   const links = menuLinks.map((link) =>
     link.href === "/launches" ? { ...link, badge: String((registry.launches || []).length) } : link,
   );
@@ -163,6 +168,14 @@ export default function DashboardLayout({ pathname, children }) {
             <span className="kbd">⌘ F</span>
           </div>
           <div className="tb-right">
+            <div
+              className={`data-source-pill ${source === "api" ? "api" : "seed"}`}
+              title={dataSourceTitle}
+              aria-label={`Dashboard source: ${dataSourceLabel}`}
+            >
+              <span className="source-dot" />
+              {dataSourceLabel}
+            </div>
             <div className="network-pill" aria-label={`Connected to Solana ${workspace.cluster}`}>
               <span className="ndot" />
               {workspace.cluster}

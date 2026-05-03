@@ -3,6 +3,7 @@ import path from "node:path";
 import { config } from "./config.js";
 
 const registryPath = config.registry.path;
+const seedRegistryPath = config.registry.seedPath;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -92,7 +93,7 @@ function normalizeEvent(input) {
 
 function liveEventFromReceipt(event) {
   const token = event.token ? String(event.token).toUpperCase() : null;
-  const wallet = event.wallet ? `${event.wallet.slice(0, 5)}…${event.wallet.slice(-4)}` : "demo wallet";
+  const wallet = event.wallet ? `${event.wallet.slice(0, 5)}…${event.wallet.slice(-4)}` : "unknown wallet";
 
   return {
     type: event.type.includes("claim") ? "claim" : event.type.includes("referral") ? "raffle" : "sprint",
@@ -111,8 +112,18 @@ function liveEventFromReceipt(event) {
 }
 
 export async function readRegistry() {
-  const raw = await readFile(registryPath, "utf8");
-  return JSON.parse(raw);
+  try {
+    const raw = await readFile(registryPath, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+
+    const seed = JSON.parse(await readFile(seedRegistryPath, "utf8"));
+    await writeRegistry(seed);
+    return seed;
+  }
 }
 
 export async function writeRegistry(nextRegistry) {
@@ -161,7 +172,32 @@ export async function recordEvent(input) {
     registry.eventReceipts = registry.eventReceipts || [];
     registry.eventReceipts.unshift(event);
     registry.liveEvents = [liveEventFromReceipt(event), ...(registry.liveEvents || [])].slice(0, 20);
+
+    if (event.type === "first_buy_completed" || event.type === "buy_completed") {
+      const token = String(event.token || "").toUpperCase();
+      const launch = (registry.launches || []).find((item) => item.sym === token);
+
+      if (launch) {
+        launch.buyers = Number(launch.buyers || 0) + 1;
+        launch.updatedAt = new Date().toISOString();
+      }
+    }
+
     return event;
+  });
+}
+
+export async function hasBuyEventForWallet({ token, wallet }) {
+  const registry = await readRegistry();
+  const normalizedToken = String(token || "").toUpperCase();
+  const normalizedWallet = String(wallet || "");
+
+  return (registry.eventReceipts || []).some((event) => {
+    if (event.type !== "first_buy_completed" && event.type !== "buy_completed") {
+      return false;
+    }
+
+    return String(event.token || "").toUpperCase() === normalizedToken && String(event.wallet || "") === normalizedWallet;
   });
 }
 

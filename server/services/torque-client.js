@@ -1,4 +1,6 @@
 import { config } from "../config.js";
+import { getTorqueEventSchema } from "./torque-event-catalog.js";
+import { PublicKey } from "@solana/web3.js";
 
 function parseJsonMaybe(text) {
   if (!text) {
@@ -38,12 +40,17 @@ function isPrimitive(value) {
 }
 
 function buildEventData(input) {
+  const eventName = String(input.eventName || input.type || input.eventType || "").trim();
+  const schema = getTorqueEventSchema(eventName);
+  const allowedFields = schema ? new Set(schema.fields.map((field) => field.fieldName)) : null;
   const payload = input.payload && typeof input.payload === "object" && !Array.isArray(input.payload) ? input.payload : {};
   const data = {};
 
   for (const [key, value] of Object.entries(payload)) {
-    if (isPrimitive(value) && (typeof value !== "number" || Number.isFinite(value))) {
-      data[normalizeFieldName(key)] = value;
+    const fieldName = normalizeFieldName(key);
+
+    if (isPrimitive(value) && (typeof value !== "number" || Number.isFinite(value)) && (!allowedFields || allowedFields.has(fieldName))) {
+      data[fieldName] = value;
     }
   }
 
@@ -56,7 +63,7 @@ function buildEventData(input) {
   };
 
   for (const [key, value] of Object.entries(reserved)) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (value !== undefined && value !== null && value !== "" && (!allowedFields || allowedFields.has(key))) {
       data[key] = value;
     }
   }
@@ -76,23 +83,110 @@ export function buildTorqueEvent(input) {
   };
 }
 
-export async function emitTorqueEvent(input) {
-  const request = buildTorqueEvent(input);
+function isValidFieldValue(value, type) {
+  if (type === "string") {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+
+  if (type === "number") {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+
+  if (type === "boolean") {
+    return typeof value === "boolean";
+  }
+
+  return false;
+}
+
+export function validateTorqueEventRequest(request) {
+  const issues = [];
 
   if (!request.eventName) {
+    issues.push({ field: "eventName", code: "required", message: "Event name is required." });
+  }
+
+  if (!request.userPubkey) {
+    issues.push({ field: "userPubkey", code: "required", message: "User wallet is required." });
+  } else {
+    try {
+      new PublicKey(request.userPubkey);
+    } catch {
+      issues.push({ field: "userPubkey", code: "invalid_pubkey", message: "User wallet must be a valid Solana public key." });
+    }
+  }
+
+  if (!request.eventName) {
+    return issues;
+  }
+
+  const schema = getTorqueEventSchema(request.eventName);
+
+  if (!schema) {
+    issues.push({
+      field: "eventName",
+      code: "unknown_event",
+      message: `${request.eventName} is not in the local Torque event catalog.`,
+    });
+    return issues;
+  }
+
+  for (const field of schema.fields) {
+    const value = request.data[field.fieldName];
+
+    if (value === undefined || value === null || value === "") {
+      issues.push({
+        field: field.fieldName,
+        code: "required",
+        message: `${field.fieldName} is required for ${request.eventName}.`,
+      });
+      continue;
+    }
+
+    if (!isValidFieldValue(value, field.type)) {
+      issues.push({
+        field: field.fieldName,
+        code: "invalid_type",
+        expectedType: field.type,
+        actualType: Array.isArray(value) ? "array" : typeof value,
+        message: `${field.fieldName} must be a ${field.type}.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+export async function emitTorqueEvent(input) {
+  const request = buildTorqueEvent(input);
+  const validationIssues = validateTorqueEventRequest(request);
+
+  if (validationIssues.some((issue) => issue.field === "eventName" && issue.code === "required")) {
     return {
       ok: false,
       skipped: true,
       reason: "missing_event_name",
+      validationIssues,
       request,
     };
   }
 
-  if (!request.userPubkey) {
+  if (validationIssues.some((issue) => issue.field === "userPubkey" && issue.code === "required")) {
     return {
       ok: false,
       skipped: true,
       reason: "missing_user_pubkey",
+      validationIssues,
+      request,
+    };
+  }
+
+  if (validationIssues.length > 0) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "invalid_event_payload",
+      validationIssues,
       request,
     };
   }

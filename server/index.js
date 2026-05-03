@@ -4,10 +4,17 @@ import {
   createCampaign,
   createLaunch,
   getCampaignResults,
+  hasBuyEventForWallet,
   readRegistry,
   recordEvent,
 } from "./registry-store.js";
-import { getLaunchLabStatus, prepareLaunchDraft } from "./services/raydium-launchlab.js";
+import {
+  buildBuyTransaction,
+  buildLaunchTransaction,
+  getLaunchLabStatus,
+  prepareLaunchDraft,
+  prepareLaunchTransactionPlan,
+} from "./services/raydium-launchlab.js";
 import { getSolanaStatus } from "./services/solana.js";
 import { torqueEventSchemas } from "./services/torque-event-catalog.js";
 import { emitTorqueEvent } from "./services/torque-client.js";
@@ -57,6 +64,65 @@ function routePath(req) {
   return new URL(req.url, `http://${req.headers.host || "localhost"}`).pathname;
 }
 
+function bondingProgressFromPool(pool) {
+  if (!pool?.realB || !pool?.totalFundRaisingB) {
+    return null;
+  }
+
+  const realB = BigInt(pool.realB);
+  const totalFundRaisingB = BigInt(pool.totalFundRaisingB);
+
+  if (totalFundRaisingB <= 0n) {
+    return null;
+  }
+
+  return Number((realB * 100n) / totalFundRaisingB);
+}
+
+async function registryWithLiveRaydiumState() {
+  const registry = await readRegistry();
+  const launches = registry.launches || [];
+
+  await Promise.all(
+    launches.map(async (launch) => {
+      const poolId = launch.raydium?.poolId;
+
+      if (!poolId) {
+        return;
+      }
+
+      try {
+        const status = await getLaunchLabStatus(poolId);
+        launch.raydium = {
+          ...launch.raydium,
+          liveStatus: status.status,
+          livePool: status.pool || null,
+          liveCheckedAt: new Date().toISOString(),
+        };
+
+        const bonded = bondingProgressFromPool(status.pool);
+
+        if (bonded !== null) {
+          launch.bonded = bonded;
+          launch.migrationState = bonded >= 100 ? "migrating" : "bonding";
+        }
+      } catch (error) {
+        launch.raydium = {
+          ...launch.raydium,
+          liveStatus: "pool_read_failed",
+          liveError: error.message || "Unable to read Raydium pool.",
+          liveCheckedAt: new Date().toISOString(),
+        };
+      }
+    }),
+  );
+
+  return {
+    ...registry,
+    source: "local_api_live_registry",
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     sendJson(res, 204, {});
@@ -86,7 +152,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/registry") {
-      sendJson(res, 200, await readRegistry());
+      sendJson(res, 200, await registryWithLiveRaydiumState());
       return;
     }
 
@@ -124,6 +190,15 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const torque = await emitTorqueEvent(body);
 
+      if (torque.validationIssues?.length) {
+        sendJson(res, 400, {
+          error: "Event payload failed local Torque schema validation.",
+          validationIssues: torque.validationIssues || [],
+          torqueRequest: torque.request || null,
+        });
+        return;
+      }
+
       if (!torque.ok && !torque.skipped && config.torque.strictEvents) {
         const error = new Error("Torque event emission failed.");
         error.status = torque.status || 502;
@@ -135,7 +210,58 @@ const server = http.createServer(async (req, res) => {
         ...body,
         torqueRequest: torque.request || null,
         torqueReceipt: torque.receipt || null,
-        torqueError: torque.ok ? null : { reason: torque.reason || "torque_emit_failed", error: torque.error || null },
+        torqueError: torque.ok
+          ? null
+          : { reason: torque.reason || "torque_emit_failed", error: torque.error || null, validationIssues: torque.validationIssues || [] },
+        status: torque.ok ? "emitted" : torque.skipped ? "torque_skipped" : "torque_failed",
+      });
+      sendJson(res, 201, { event, torque });
+      return;
+    }
+
+    const buyEventMatch = pathname.match(/^\/api\/launches\/([^/]+)\/buy-events$/);
+    if (req.method === "POST" && buyEventMatch) {
+      const body = await readBody(req);
+      const token = decodeURIComponent(buyEventMatch[1]).toUpperCase();
+      const wallet = body.wallet || body.userPubkey || body.walletAddress;
+      const isRepeatBuyer = await hasBuyEventForWallet({ token, wallet });
+      const eventInput = {
+        type: isRepeatBuyer ? "buy_completed" : "first_buy_completed",
+        token,
+        wallet,
+        launchId: body.launchId || token,
+        payload: {
+          poolState: body.poolState,
+          amount: Number(body.amount || body.buyAmount || 0),
+          amountUsd: Number(body.amountUsd || body.amount_usd || 0),
+          txSignature: body.txSignature || body.signature,
+        },
+      };
+      const torque = await emitTorqueEvent(eventInput);
+
+      if (torque.validationIssues?.length) {
+        sendJson(res, 400, {
+          error: "Buy event failed local Torque schema validation.",
+          validationIssues: torque.validationIssues || [],
+          torqueRequest: torque.request || null,
+        });
+        return;
+      }
+
+      if (!torque.ok && !torque.skipped && config.torque.strictEvents) {
+        const error = new Error("Torque buy event emission failed.");
+        error.status = torque.status || 502;
+        error.details = torque;
+        throw error;
+      }
+
+      const event = await recordEvent({
+        ...eventInput,
+        torqueRequest: torque.request || null,
+        torqueReceipt: torque.receipt || null,
+        torqueError: torque.ok
+          ? null
+          : { reason: torque.reason || "torque_emit_failed", error: torque.error || null, validationIssues: torque.validationIssues || [] },
         status: torque.ok ? "emitted" : torque.skipped ? "torque_skipped" : "torque_failed",
       });
       sendJson(res, 201, { event, torque });
@@ -150,6 +276,21 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/raydium/launches/prepare") {
       sendJson(res, 200, prepareLaunchDraft(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/raydium/launches/transaction-plan") {
+      sendJson(res, 200, await prepareLaunchTransactionPlan(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/raydium/launches/build-transaction") {
+      sendJson(res, 200, await buildLaunchTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/raydium/launches/build-buy-transaction") {
+      sendJson(res, 200, await buildBuyTransaction(await readBody(req)));
       return;
     }
 

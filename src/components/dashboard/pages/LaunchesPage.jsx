@@ -1,6 +1,7 @@
 import React from "react";
 import { TokenIcon, TOKENS } from "../tokenIcons";
-import { getLaunchFilters, getMigrationSpotlightLaunches, useRegistry } from "../../../lib/launchRegistry";
+import useWallet from "../useWallet";
+import { getLaunchFilters, getMigrationSpotlightLaunches, refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
 
 const statusMap = {
   bonding: { label: "Bonding", pill: "progress" },
@@ -9,7 +10,7 @@ const statusMap = {
   draft: { label: "Draft", pill: "pending" },
 };
 
-const COLS = "minmax(220px, 2.4fr) 0.9fr 1.4fr 1.3fr 0.7fr 0.8fr 36px";
+const COLS = "minmax(220px, 2.2fr) 0.85fr 1.15fr 1fr 0.65fr 1fr 120px";
 
 const stateThemes = {
   migrating: { label: "Migrating now", bg: "#e0e7ff", text: "#3730a3", dot: "#6366f1" },
@@ -19,7 +20,10 @@ const stateThemes = {
 
 function MigrationRing({ symbol, bonded, ringSize = 132, stroke = 9 }) {
   const meta = TOKENS[symbol];
-  if (!meta) return null;
+  const from = meta?.from || "#fb7185";
+  const to = meta?.to || "#ec4899";
+  const gradient = meta?.gradient || "linear-gradient(135deg, #fb7185 0%, #ec4899 100%)";
+  const glow = meta?.glow || "rgba(236, 72, 153, 0.28)";
   const r = (ringSize - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - bonded / 100);
@@ -32,8 +36,8 @@ function MigrationRing({ symbol, bonded, ringSize = 132, stroke = 9 }) {
       <svg width={ringSize} height={ringSize} style={{ position: "absolute", inset: 0 }}>
         <defs>
           <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={meta.from} />
-            <stop offset="100%" stopColor={meta.to} />
+            <stop offset="0%" stopColor={from} />
+            <stop offset="100%" stopColor={to} />
           </linearGradient>
           <filter id={blurId} x="-30%" y="-30%" width="160%" height="160%">
             <feGaussianBlur stdDeviation="4" />
@@ -77,8 +81,8 @@ function MigrationRing({ symbol, bonded, ringSize = 132, stroke = 9 }) {
         className="absolute left-1/2 -translate-x-1/2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-tight text-white"
         style={{
           bottom: -10,
-          background: meta.gradient,
-          boxShadow: `0 8px 18px ${meta.glow}, inset 0 1px 0 rgba(255,255,255,0.3)`,
+          background: gradient,
+          boxShadow: `0 8px 18px ${glow}, inset 0 1px 0 rgba(255,255,255,0.3)`,
         }}
       >
         {bonded}%
@@ -94,12 +98,12 @@ function MigrationEntry({ symbol, bonded, time, state }) {
     <div className="group relative flex flex-col items-center text-center transition-transform duration-300 hover:-translate-y-1">
       <div
         className="pointer-events-none absolute -inset-x-4 -bottom-4 -top-4 rounded-3xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-        style={{ background: `radial-gradient(circle at 50% 30%, ${meta.glow}, transparent 65%)` }}
+        style={{ background: `radial-gradient(circle at 50% 30%, ${meta?.glow || "rgba(236, 72, 153, 0.18)"}, transparent 65%)` }}
       />
       <div className="relative">
         <MigrationRing symbol={symbol} bonded={bonded} />
       </div>
-      <div className="mt-7 text-[15px] font-bold tracking-tight text-slate-900">{meta.name}</div>
+      <div className="mt-7 text-[15px] font-bold tracking-tight text-slate-900">{meta?.name || symbol}</div>
       <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400">
         <span>${symbol}</span>
         <span className="h-1 w-1 rounded-full bg-slate-300" />
@@ -125,6 +129,20 @@ function MigrationEntry({ symbol, bonded, time, state }) {
 }
 
 function MigrationSpotlight({ tokens }) {
+  if (tokens.length === 0) {
+    return (
+      <div className="card" style={{ padding: 28 }}>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-pink-500">Raydium migration</div>
+        <h3 className="mt-2 text-[22px] font-bold leading-tight tracking-tight text-slate-900">
+          No active LaunchLab pools yet
+        </h3>
+        <div className="mt-2 text-[13px] text-slate-500">
+          This area will populate from real launch records after a devnet token is signed and submitted.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="card"
@@ -247,10 +265,222 @@ function FilterChip({ label, count, active, onClick }) {
   );
 }
 
+function DevnetLaunchPanel({ wallet, onClose, onLaunched }) {
+  const [form, setForm] = React.useState(() => ({
+    name: "Toluva Devnet Token",
+    symbol: `TLV${Math.floor(Math.random() * 900 + 100)}`,
+    uri: "https://example.com/toluva-devnet-token.json",
+    buyAmount: "10000000",
+    supply: "1000000000000000",
+    totalSellA: "793100000000000",
+    totalFundRaisingB: "85000000000",
+  }));
+  const [state, setState] = React.useState({ status: "idle", error: null, result: null, diagnostics: null });
+
+  function update(field) {
+    return (event) => {
+      setForm((current) => ({ ...current, [field]: event.target.value }));
+    };
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setState({ status: "submitting", error: null, result: null, diagnostics: null });
+
+    try {
+      const { launchDevnetToken } = await import("../../../lib/raydiumLaunchlab");
+      const result = await launchDevnetToken({ wallet, launch: form });
+      await refreshRegistry({ force: true });
+      setState({ status: "submitted", error: null, result, diagnostics: result.diagnostics || null });
+      onLaunched?.();
+    } catch (error) {
+      setState({
+        status: "error",
+        error: error instanceof Error ? error.message : "Launch failed.",
+        result: null,
+        diagnostics: error?.diagnostics || null,
+      });
+    }
+  }
+
+  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected";
+
+  return (
+    <form className="card" onSubmit={submit} style={{ padding: 22 }}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-pink-500">Raydium devnet</div>
+          <h3 className="mt-1 text-[18px] font-bold tracking-tight text-slate-900">Wallet-signed LaunchLab token</h3>
+          <div className="mt-1 text-[12.5px] text-slate-500">
+            Generates a mint keypair in-browser, asks your wallet to sign, submits to devnet, then emits Torque launch telemetry.
+          </div>
+        </div>
+        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-[11px] text-slate-500">
+          {wallet.connected ? wallet.short : "no wallet"}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Name</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 text-[13px] outline-none focus:border-pink-300" value={form.name} onChange={update("name")} />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Symbol</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] uppercase outline-none focus:border-pink-300" value={form.symbol} onChange={update("symbol")} />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Metadata URI</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-pink-300" value={form.uri} onChange={update("uri")} />
+        </label>
+      </div>
+
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Buy amount</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-pink-300" value={form.buyAmount} onChange={update("buyAmount")} />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Supply</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-pink-300" value={form.supply} onChange={update("supply")} />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Sell A</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-pink-300" value={form.totalSellA} onChange={update("totalSellA")} />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-[12px] font-semibold text-slate-600">Raise B</span>
+          <input className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[13px] outline-none focus:border-pink-300" value={form.totalFundRaisingB} onChange={update("totalFundRaisingB")} />
+        </label>
+      </div>
+
+      {wallet.connected && wallet.source !== "injected" && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[12.5px] font-medium text-amber-800">
+          Demo wallet cannot sign LaunchLab transactions. Connect Phantom, Backpack, or another injected Solana wallet.
+        </div>
+      )}
+
+      {state.status === "submitting" && (
+        <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-3 text-[12.5px] font-medium text-indigo-800">
+          Checking devnet wallet, simulating the Raydium transaction, then requesting wallet approval.
+        </div>
+      )}
+
+      {state.error && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-[12.5px] font-medium text-rose-700">
+          {state.error}
+        </div>
+      )}
+
+      {state.diagnostics && (
+        <details className="mt-4 rounded-xl border border-slate-200 bg-slate-950 px-3.5 py-3 text-[12px] text-slate-100" open={state.status === "error"}>
+          <summary className="cursor-pointer text-[12px] font-semibold text-slate-200">Launch diagnostics</summary>
+          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-200">
+            {JSON.stringify(state.diagnostics, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      {state.result && (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-[12.5px] text-emerald-800">
+          <div className="font-semibold">Submitted to devnet</div>
+          <div className="mt-1 font-mono text-[11.5px]">Pool {state.result.poolId}</div>
+          <div className="font-mono text-[11.5px]">Tx {state.result.signature}</div>
+        </div>
+      )}
+
+      <div className="mt-5 flex items-center justify-end gap-3">
+        <button className="btn primary" type="submit" disabled={disabled} style={disabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined}>
+          {state.status === "submitting" ? "Submitting..." : "Sign & launch on devnet"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function RaydiumPoolCell({ launch }) {
+  const poolId = launch.raydium?.poolId || launch.pool;
+  const liveStatus = launch.raydium?.liveStatus;
+
+  if (!poolId) {
+    return <span className="text-slate-400">—</span>;
+  }
+
+  return (
+    <div className="min-w-0">
+      <div className="truncate font-mono text-[12px] font-semibold text-slate-700" title={poolId}>
+        {poolId.slice(0, 4)}…{poolId.slice(-4)}
+      </div>
+      <div className={`mt-1 text-[10.5px] font-semibold ${liveStatus === "pool_read" ? "text-emerald-600" : "text-slate-400"}`}>
+        {liveStatus === "pool_read" ? "live pool" : liveStatus || "pending read"}
+      </div>
+    </div>
+  );
+}
+
+function BuyButton({ launch, wallet, onBought }) {
+  const [state, setState] = React.useState({ status: "idle", error: null, diagnostics: null });
+  const canBuy = Boolean(launch.raydium?.mint && (launch.raydium?.poolId || launch.pool));
+
+  async function buy() {
+    setState({ status: "submitting", error: null, diagnostics: null });
+
+    try {
+      const { buyDevnetToken } = await import("../../../lib/raydiumLaunchlab");
+      const result = await buyDevnetToken({ wallet, launch, buyAmount: "10000000" });
+      await refreshRegistry({ force: true });
+      setState({ status: "done", error: null, diagnostics: result.diagnostics || null });
+      onBought?.();
+    } catch (error) {
+      setState({
+        status: "error",
+        error: error instanceof Error ? error.message : "Buy failed.",
+        diagnostics: error?.diagnostics || error?.payload || null,
+      });
+    }
+  }
+
+  if (!canBuy) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={buy}
+        disabled={state.status === "submitting" || !wallet.connected || wallet.source !== "injected"}
+        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-pink-200 hover:text-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {state.status === "submitting" ? "Buying..." : "Buy 0.01 SOL"}
+      </button>
+      {state.error && <div className="max-w-[160px] text-[10.5px] font-medium leading-snug text-rose-600">{state.error}</div>}
+      {state.diagnostics && state.status === "error" && (
+        <details className="max-w-[180px] text-[10.5px] text-slate-500">
+          <summary className="cursor-pointer font-semibold">Details</summary>
+          <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-2 font-mono text-[10px] text-slate-100">
+            {JSON.stringify(state.diagnostics, null, 2)}
+          </pre>
+        </details>
+      )}
+      {state.status === "done" && <div className="text-[10.5px] font-semibold text-emerald-600">Buy recorded</div>}
+    </div>
+  );
+}
+
 export default function LaunchesPage() {
-  const { registry } = useRegistry();
+  const { registry, source, error } = useRegistry();
+  const wallet = useWallet();
   const pageLaunches = registry.launches || [];
   const [filter, setFilter] = React.useState("all");
+  const [showLaunchPanel, setShowLaunchPanel] = React.useState(false);
   const filters = getLaunchFilters(registry);
   const spotlightLaunches = getMigrationSpotlightLaunches(registry);
   const visible = pageLaunches.filter((l) => filter === "all" || l.status === filter);
@@ -263,17 +493,32 @@ export default function LaunchesPage() {
           <div className="sub">Every token you've shipped through Toluva.</div>
         </div>
         <div className="actions">
-          <button className="btn primary" type="button">
+          <button className="btn primary" type="button" onClick={() => setShowLaunchPanel(true)}>
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
             New launch
           </button>
-          <button className="btn ghost" type="button">
-            Import from LaunchLab
-          </button>
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[12.5px] text-slate-600">
+        <div>
+          Registry source:{" "}
+          <span className={`font-semibold ${source === "api" ? "text-emerald-700" : "text-amber-700"}`}>
+            {source === "api" ? "local API file registry" : "local API offline"}
+          </span>
+        </div>
+        {error && <div className="font-medium text-amber-700">{error}</div>}
+      </div>
+
+      {showLaunchPanel && (
+        <DevnetLaunchPanel
+          wallet={wallet}
+          onClose={() => setShowLaunchPanel(false)}
+          onLaunched={() => setFilter("all")}
+        />
+      )}
 
       <MigrationSpotlight tokens={spotlightLaunches} />
 
@@ -301,9 +546,9 @@ export default function LaunchesPage() {
           <div>Status</div>
           <div>Bonding curve</div>
           <div>Campaign</div>
-          <div>Buyers</div>
+          <div>Buys</div>
           <div>Pool</div>
-          <div />
+          <div>Action</div>
         </div>
         <div>
           {visible.map((l) => (
@@ -333,13 +578,11 @@ export default function LaunchesPage() {
               <div className="font-mono text-[13px] font-semibold tabular-nums text-slate-700">
                 {l.buyers > 0 ? l.buyers : <span className="text-slate-400">—</span>}
               </div>
-              <div className="font-mono text-[13px] font-semibold tabular-nums text-slate-700">
-                {l.pool || <span className="text-slate-400">—</span>}
+              <div>
+                <RaydiumPoolCell launch={l} />
               </div>
-              <div className="open-arrow">
-                <svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-                  <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+              <div>
+                <BuyButton launch={l} wallet={wallet} onBought={() => setFilter("all")} />
               </div>
             </div>
           ))}

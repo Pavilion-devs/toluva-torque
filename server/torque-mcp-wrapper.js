@@ -13,7 +13,7 @@ if (!process.env.TORQUE_API_KEY) {
   process.exit(1);
 }
 
-const child = spawn("npx", ["@torque-labs/mcp"], {
+const child = spawn("npx", ["--yes", "@torque-labs/mcp@latest"], {
   env: process.env,
   stdio: "inherit",
   shell: process.platform === "win32",
