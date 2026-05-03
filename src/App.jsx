@@ -8,6 +8,7 @@ import DashboardOverview from "./components/dashboard/pages/DashboardOverview";
 import LaunchesPage from "./components/dashboard/pages/LaunchesPage";
 import CampaignsPage from "./components/dashboard/pages/CampaignsPage";
 import AnalyticsPage from "./components/dashboard/pages/AnalyticsPage";
+import HistoryPage from "./components/dashboard/pages/HistoryPage";
 import IncentivesPage from "./components/dashboard/pages/IncentivesPage";
 import SettingsPage from "./components/dashboard/pages/SettingsPage";
 import HelpPage from "./components/dashboard/pages/HelpPage";
@@ -18,6 +19,7 @@ const dashboardRoutes = {
   "/launches": LaunchesPage,
   "/campaigns": CampaignsPage,
   "/analytics": AnalyticsPage,
+  "/history": HistoryPage,
   "/incentives": IncentivesPage,
   "/settings": SettingsPage,
   "/help": HelpPage,

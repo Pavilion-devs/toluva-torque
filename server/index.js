@@ -76,7 +76,7 @@ function bondingProgressFromPool(pool) {
     return null;
   }
 
-  return Number((realB * 100n) / totalFundRaisingB);
+  return Number((realB * 100000n) / totalFundRaisingB) / 1000;
 }
 
 async function registryWithLiveRaydiumState() {

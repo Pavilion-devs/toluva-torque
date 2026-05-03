@@ -48,6 +48,16 @@ const menuLinks = [
     ),
   },
   {
+    href: "/history",
+    label: "History",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M4 5h16M4 12h16M4 19h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M18 16v5l3-2.5L18 16Z" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
     href: "/incentives",
     label: "Incentives",
     icon: (
@@ -110,9 +120,20 @@ export default function DashboardLayout({ pathname, children }) {
     source === "api"
       ? "Dashboard data is loaded from the local API file registry."
       : error || "Dashboard is empty because the local API is unavailable.";
-  const links = menuLinks.map((link) =>
-    link.href === "/launches" ? { ...link, badge: String((registry.launches || []).length) } : link,
-  );
+  const buyEventCount = (registry.eventReceipts || []).filter(
+    (event) => event.type === "first_buy_completed" || event.type === "buy_completed",
+  ).length;
+  const links = menuLinks.map((link) => {
+    if (link.href === "/launches") {
+      return { ...link, badge: String((registry.launches || []).length) };
+    }
+
+    if (link.href === "/history" && buyEventCount > 0) {
+      return { ...link, badge: String(buyEventCount) };
+    }
+
+    return link;
+  });
 
   return (
     <div className="shell" data-screen-label="Dashboard">

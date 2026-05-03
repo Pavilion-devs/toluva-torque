@@ -381,6 +381,17 @@
       .analytics-head h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
       .analytics-head .menu { margin-left: auto; color: var(--muted); cursor: pointer; padding: 6px 8px; border-radius: 8px; }
       .analytics-head .menu:hover { background: #f7f8fb; color: var(--ink); }
+      .analytics-total {
+        margin-left: auto;
+        padding: 7px 11px;
+        border-radius: 999px;
+        background: var(--green-pale);
+        border: 1px solid var(--green-light);
+        color: var(--green);
+        font: 700 11.5px/1 "Geist Mono", ui-monospace, monospace;
+        letter-spacing: 0;
+        white-space: nowrap;
+      }
 
       .chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 14px; align-items: end; height: 170px; position: relative; padding-top: 20px; }
       .bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; height: 100%; justify-content: flex-end; position: relative; }
@@ -488,6 +499,24 @@
       .t-name { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
       .t-task { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
       .t-task b { color: var(--ink-dim); font-weight: 500; }
+      .t-extra {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .t-extra span {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--card-muted);
+        border: 1px solid var(--line);
+        color: var(--ink-dim);
+        font-size: 11.5px;
+        line-height: 1;
+      }
       .status-pill {
         padding: 5px 12px;
         border-radius: 999px;
@@ -519,6 +548,25 @@
       .tracker { padding: 24px; position: relative; overflow: hidden; }
       .tracker h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: #fff; position: relative; }
       .tracker .time { font-size: 44px; font-weight: 700; letter-spacing: -0.025em; color: #fff; margin-top: 18px; position: relative; font-variant-numeric: tabular-nums; }
+      .tracker-metrics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+        position: relative;
+      }
+      .tracker-metrics span {
+        min-height: 28px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 7px 10px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: rgba(255,255,255,0.76);
+        font: 600 11.5px/1 "Geist", sans-serif;
+        white-space: nowrap;
+      }
       .tracker-ctrls { display: flex; gap: 10px; margin-top: 22px; position: relative; }
       .ctrl {
         width: 42px; height: 42px;
@@ -745,6 +793,14 @@
       .data-row:hover {
         background:
           linear-gradient(90deg, rgba(252, 231, 243, 0.4), rgba(237, 233, 254, 0.25));
+      }
+      .history-table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        border-radius: var(--radius);
+      }
+      .history-table {
+        min-width: 1120px;
       }
       .data-row .open-arrow {
         width: 32px; height: 32px;

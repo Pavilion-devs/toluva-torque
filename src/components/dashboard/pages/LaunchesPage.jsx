@@ -10,7 +10,9 @@ const statusMap = {
   draft: { label: "Draft", pill: "pending" },
 };
 
-const COLS = "minmax(220px, 2.2fr) 0.85fr 1.15fr 1fr 0.65fr 1fr 120px";
+const COLS = "minmax(220px, 2fr) 0.8fr 1.05fr 0.9fr 0.55fr 0.95fr minmax(220px, 1.35fr)";
+const BUY_PRESETS_SOL = ["0.01", "0.05", "0.1"];
+const LAMPORTS_PER_SOL = 1_000_000_000;
 
 const stateThemes = {
   migrating: { label: "Migrating now", bg: "#e0e7ff", text: "#3730a3", dot: "#6366f1" },
@@ -425,16 +427,34 @@ function RaydiumPoolCell({ launch }) {
   );
 }
 
+function solToLamports(value) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  return String(Math.floor(amount * LAMPORTS_PER_SOL));
+}
+
 function BuyButton({ launch, wallet, onBought }) {
   const [state, setState] = React.useState({ status: "idle", error: null, diagnostics: null });
+  const [amountSol, setAmountSol] = React.useState(BUY_PRESETS_SOL[0]);
   const canBuy = Boolean(launch.raydium?.mint && (launch.raydium?.poolId || launch.pool));
+  const buyAmountLamports = solToLamports(amountSol);
+  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected" || !buyAmountLamports;
 
   async function buy() {
+    if (!buyAmountLamports) {
+      setState({ status: "error", error: "Enter a valid SOL amount.", diagnostics: null });
+      return;
+    }
+
     setState({ status: "submitting", error: null, diagnostics: null });
 
     try {
       const { buyDevnetToken } = await import("../../../lib/raydiumLaunchlab");
-      const result = await buyDevnetToken({ wallet, launch, buyAmount: "10000000" });
+      const result = await buyDevnetToken({ wallet, launch, buyAmount: buyAmountLamports });
       await refreshRegistry({ force: true });
       setState({ status: "done", error: null, diagnostics: result.diagnostics || null });
       onBought?.();
@@ -452,14 +472,50 @@ function BuyButton({ launch, wallet, onBought }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-col items-start gap-1">
+    <div className="flex min-w-0 flex-col items-start gap-2">
+      <div className="flex w-full flex-wrap items-center gap-1.5">
+        {BUY_PRESETS_SOL.map((amount) => (
+          <button
+            key={amount}
+            type="button"
+            onClick={() => {
+              setAmountSol(amount);
+              setState((current) => ({ ...current, error: null }));
+            }}
+            className={`min-h-8 rounded-full border px-2.5 text-[11.5px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 ${
+              amountSol === amount
+                ? "border-pink-200 bg-pink-50 text-pink-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+            }`}
+            aria-pressed={amountSol === amount}
+          >
+            {amount}
+          </button>
+        ))}
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">Custom buy amount in SOL</span>
+          <input
+            type="number"
+            min="0.000001"
+            step="0.001"
+            inputMode="decimal"
+            value={amountSol}
+            onChange={(event) => {
+              setAmountSol(event.target.value);
+              setState((current) => ({ ...current, error: null }));
+            }}
+            className="min-h-8 w-full rounded-full border border-slate-200 bg-white px-2.5 font-mono text-[11.5px] text-slate-700 outline-none transition-colors focus:border-pink-300 focus:ring-2 focus:ring-pink-100"
+            placeholder="SOL"
+          />
+        </label>
+      </div>
       <button
         type="button"
         onClick={buy}
-        disabled={state.status === "submitting" || !wallet.connected || wallet.source !== "injected"}
-        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-pink-200 hover:text-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        className="min-h-9 w-full rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition-colors hover:border-pink-200 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {state.status === "submitting" ? "Buying..." : "Buy 0.01 SOL"}
+        {state.status === "submitting" ? "Buying..." : `Buy ${amountSol || "0"} SOL`}
       </button>
       {state.error && <div className="max-w-[160px] text-[10.5px] font-medium leading-snug text-rose-600">{state.error}</div>}
       {state.diagnostics && state.status === "error" && (

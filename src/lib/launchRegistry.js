@@ -2,6 +2,8 @@ import React from "react";
 import fallbackRegistry from "../../data/launch-registry.json";
 
 const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787";
+const registryRefreshMs = 10_000;
+const lamportsPerSol = 1_000_000_000;
 const listeners = new Set();
 
 let registryState = {
@@ -82,6 +84,11 @@ export function useRegistry() {
 
   React.useEffect(() => {
     refreshRegistry();
+    const timer = window.setInterval(() => {
+      refreshRegistry({ force: true });
+    }, registryRefreshMs);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   return state;
@@ -133,9 +140,18 @@ export function getCampaignCounts(sourceRegistry = fallbackRegistry) {
 function eventAmount(event) {
   const payload = event?.payload || {};
   const data = event?.torqueRequest?.data || {};
-  const value = payload.amountUsd ?? payload.amount_usd ?? data.amount_usd ?? payload.amount ?? data.amount ?? 0;
-  const amount = Number(value);
-  return Number.isFinite(amount) ? amount : 0;
+  const usdAmount = Number(payload.amountUsd ?? payload.amount_usd ?? data.amount_usd);
+
+  if (Number.isFinite(usdAmount) && usdAmount > 0) {
+    return usdAmount;
+  }
+
+  const rawAmount = Number(payload.amount ?? data.amount ?? 0);
+  if (!Number.isFinite(rawAmount)) {
+    return 0;
+  }
+
+  return rawAmount >= 1_000_000 ? rawAmount / lamportsPerSol : rawAmount;
 }
 
 function dayKey(dateValue) {
