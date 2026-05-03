@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "../Link";
 import { TokenIcon, getTokenMeta } from "../tokenIcons";
 import { getCampaignCounts, useRegistry } from "../../../lib/launchRegistry";
 
@@ -239,6 +240,62 @@ function CampaignCard({ c }) {
   );
 }
 
+function BuyEventCampaignCard({ registry }) {
+  const buyEvents = (registry.eventReceipts || []).filter(
+    (event) => event.type === "first_buy_completed" || event.type === "buy_completed",
+  );
+  const wallets = new Set(buyEvents.map((event) => event.wallet).filter(Boolean));
+  const tokens = new Set(buyEvents.map((event) => event.token).filter(Boolean));
+  const latestToken = buyEvents[0]?.token || (registry.launches || [])[0]?.sym || "TOKEN";
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div className="flex items-start justify-between p-5" style={{ borderBottom: "1px solid var(--line)" }}>
+        <div className="flex min-w-0 items-start gap-3">
+          <TokenIcon symbol={latestToken} size={44} />
+          <div className="min-w-0">
+            <span className="inline-flex items-center gap-1 rounded-full bg-pink-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pink-600">
+              Early Buyer
+            </span>
+            <div className="mt-1 text-[16px] font-bold tracking-tight text-slate-900">Live buy leaderboard</div>
+            <div className="mt-0.5 text-[12px] text-slate-400">Built from Torque buy receipts</div>
+          </div>
+        </div>
+        <span className="status-pill progress">Preview</span>
+      </div>
+      <div className="grid flex-1 gap-3 p-5 sm:grid-cols-3">
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Buy events</div>
+          <div className="mt-1 font-mono text-[24px] font-bold text-slate-900">{buyEvents.length}</div>
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Wallets</div>
+          <div className="mt-1 font-mono text-[24px] font-bold text-slate-900">{wallets.size}</div>
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Launches</div>
+          <div className="mt-1 font-mono text-[24px] font-bold text-slate-900">{tokens.size || (registry.launches || []).length}</div>
+        </div>
+      </div>
+      <div
+        className="flex items-center justify-between px-5 py-3.5"
+        style={{ borderTop: "1px solid var(--line)", background: "var(--card-muted)" }}
+      >
+        <div className="text-[12px] font-medium text-slate-600">Ready for Torque preview</div>
+        <Link
+          href="/campaigns/early-buyers"
+          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-[12px] font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-900"
+        >
+          View
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+            <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 const tabs = [
   { key: "live", label: "Live" },
   { key: "scheduled", label: "Scheduled" },
@@ -261,16 +318,18 @@ export default function CampaignsPage() {
           <div className="sub">Every Torque incentive attached to your launches.</div>
         </div>
         <div className="actions">
-          <button className="btn primary" type="button">
+          <Link href="/campaigns/early-buyers" className="btn primary">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
-            New campaign
-          </button>
+            Early buyers
+          </Link>
         </div>
       </div>
 
       <LiveActivityTicker events={events} />
+
+      <BuyEventCampaignCard registry={registry} />
 
       <div className="flex flex-wrap items-center gap-2">
         {tabs.map((t) => (
