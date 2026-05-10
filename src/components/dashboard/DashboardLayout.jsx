@@ -101,6 +101,12 @@ const generalLinks = [
   },
 ];
 
+function isActive(linkHref, pathname) {
+  if (linkHref === "/dashboard") return pathname === "/dashboard";
+  if (linkHref === "/") return false;
+  return pathname === linkHref || pathname.startsWith(linkHref + "/");
+}
+
 function NavLink({ href, label, icon, badge, active }) {
   return (
     <Link href={href} className={`sb-link${active ? " active" : ""}`}>
@@ -113,13 +119,8 @@ function NavLink({ href, label, icon, badge, active }) {
 
 export default function DashboardLayout({ pathname, children }) {
   const wallet = useWallet();
-  const { registry, source, error } = useRegistry();
+  const { registry } = useRegistry();
   const workspace = registry.workspace;
-  const dataSourceLabel = source === "api" ? "API data" : "API offline";
-  const dataSourceTitle =
-    source === "api"
-      ? "Dashboard data is loaded from the local API file registry."
-      : error || "Dashboard is empty because the local API is unavailable.";
   const buyEventCount = (registry.eventReceipts || []).filter(
     (event) => event.type === "first_buy_completed" || event.type === "buy_completed",
   ).length;
@@ -150,7 +151,7 @@ export default function DashboardLayout({ pathname, children }) {
         <div className="sb-section">Menu</div>
         <nav className="sb-nav">
           {links.map((link) => (
-            <NavLink key={link.href} {...link} active={pathname === link.href} />
+            <NavLink key={link.href} {...link} active={isActive(link.href, pathname)} />
           ))}
         </nav>
         <div className="sb-section" style={{ marginTop: 22 }}>
@@ -189,18 +190,6 @@ export default function DashboardLayout({ pathname, children }) {
             <span className="kbd">⌘ F</span>
           </div>
           <div className="tb-right">
-            <div
-              className={`data-source-pill ${source === "api" ? "api" : "seed"}`}
-              title={dataSourceTitle}
-              aria-label={`Dashboard source: ${dataSourceLabel}`}
-            >
-              <span className="source-dot" />
-              {dataSourceLabel}
-            </div>
-            <div className="network-pill" aria-label={`Connected to Solana ${workspace.cluster}`}>
-              <span className="ndot" />
-              {workspace.cluster}
-            </div>
             {wallet.connected ? (
               <button
                 type="button"

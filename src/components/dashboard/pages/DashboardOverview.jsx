@@ -56,26 +56,21 @@ function parseDate(value) {
   return date && !Number.isNaN(date.getTime()) ? date : null;
 }
 
-function formatDuration(ms) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+function formatUptime(ms) {
+  if (ms <= 0) return "00:00:00";
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+}
 
-  if (days > 0) {
-    return `${days}d ${hours}h`;
-  }
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-
-  return `${seconds}s`;
+function gaugeArcEnd(pct) {
+  const angle = (1 - Math.max(0, Math.min(100, pct)) / 100) * Math.PI;
+  return {
+    x: +(110 + 90 * Math.cos(angle)).toFixed(2),
+    y: +(120 - 90 * Math.sin(angle)).toFixed(2),
+  };
 }
 
 function formatRelative(value, now) {
@@ -198,17 +193,36 @@ export default function DashboardOverview() {
   const targetSol = poolTargetSol(migrationLaunch);
   const firstLaunchAt = launches.reduce((oldest, launch) => {
     const createdAt = parseDate(launch.createdAt);
-    if (!createdAt) {
-      return oldest;
-    }
-
+    if (!createdAt) return oldest;
     return !oldest || createdAt < oldest ? createdAt : oldest;
   }, null);
   const latestEvent = events[0] || null;
-  const runtime = firstLaunchAt ? formatDuration(now.getTime() - firstLaunchAt.getTime()) : "EMPTY";
+  const uptimeDisplay = formatUptime(firstLaunchAt ? now.getTime() - firstLaunchAt.getTime() : 0);
+  const latestEventMs = latestEvent ? parseDate(latestEvent.createdAt)?.getTime() : null;
+  const heartbeatAgeSec = latestEventMs ? Math.round((now.getTime() - latestEventMs) / 1000) : null;
+  const healthLabel = heartbeatAgeSec === null
+    ? "No pulse"
+    : heartbeatAgeSec <= 45
+      ? `Online · ${heartbeatAgeSec}s ago`
+      : heartbeatAgeSec <= 120
+        ? `Stale · ${heartbeatAgeSec}s ago`
+        : `Offline · ${Math.round(heartbeatAgeSec / 60)}m ago`;
+  const healthTone = heartbeatAgeSec === null || heartbeatAgeSec > 120
+    ? "rgba(240, 140, 150, 0.85)"
+    : heartbeatAgeSec <= 45
+      ? "rgba(130, 230, 170, 0.95)"
+      : "rgba(255, 195, 120, 0.9)";
   const visibleLaunches = launches.slice(0, 5);
   const visibleEvents = events.slice(0, 5);
-  const maxVolume = Math.max(...analytics.volumeSeries.map((point) => point.value), 0);
+  const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+  const volumeMap = Object.fromEntries(analytics.volumeSeries.map((p) => [p.date, p.value]));
+  const sevenDayWindow = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now);
+    d.setDate(now.getDate() - (6 - i));
+    const key = d.toISOString().slice(0, 10);
+    return { date: key, value: volumeMap[key] || 0, dayLabel: DAY_LABELS[d.getDay()] };
+  });
+  const maxVolume = Math.max(...sevenDayWindow.map((p) => p.value), 0);
 
   return (
     <div className="page">
@@ -234,6 +248,9 @@ export default function DashboardOverview() {
         <div className="card stat dark c-stat-1">
           <div className="stat-head">
             <div className="stat-title">Total Launches</div>
+            <div className="stat-arrow">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
           </div>
           <div className="stat-value">{launches.length}</div>
           <div className="stat-foot">Records written by the local API</div>
@@ -242,6 +259,9 @@ export default function DashboardOverview() {
         <div className="card stat c-stat-2">
           <div className="stat-head">
             <div className="stat-title">Raydium Pools</div>
+            <div className="stat-arrow">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
           </div>
           <div className="stat-value">{liveRaydiumLaunches.length}</div>
           <div className="stat-foot">{raydiumLaunches.length} pool-backed launch{raydiumLaunches.length === 1 ? "" : "es"}</div>
@@ -250,6 +270,9 @@ export default function DashboardOverview() {
         <div className="card stat c-stat-3">
           <div className="stat-head">
             <div className="stat-title">Torque Events</div>
+            <div className="stat-arrow">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
           </div>
           <div className="stat-value">{acceptedEvents.length}</div>
           <div className="stat-foot">Torque accepted receipts</div>
@@ -258,6 +281,9 @@ export default function DashboardOverview() {
         <div className="card stat c-stat-4">
           <div className="stat-head">
             <div className="stat-title">Active Campaigns</div>
+            <div className="stat-arrow">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
           </div>
           <div className="stat-value">{activeCampaigns}</div>
           <div className="stat-foot">Real campaign records</div>
@@ -265,25 +291,31 @@ export default function DashboardOverview() {
 
         <div className="card c-analytics">
           <div className="analytics-head">
-            <h3>Buy Volume Events</h3>
-            <div className="analytics-total">{formatSol(totalBuySol)}</div>
-          </div>
-          {analytics.volumeSeries.length > 0 ? (
-            <div className="chart">
-              {analytics.volumeSeries.map((point) => (
-                <div className="bar-wrap" key={point.date}>
-                  {point.value === maxVolume && maxVolume > 0 ? <div className="peak-label">{formatSol(point.value)}</div> : null}
-                  <div
-                    className="bar on"
-                    style={{ height: `${Math.max(8, Math.round((point.value / Math.max(maxVolume, 1)) * 100))}%` }}
-                  />
-                  <div className="bar-label">{point.date.slice(5)}</div>
-                </div>
-              ))}
+            <h3>Buy Volume Events · last 7 days</h3>
+            <div className="menu" style={{ marginLeft: "auto", color: "var(--muted)", cursor: "pointer", padding: "6px 8px", borderRadius: 8 }}>
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+                <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+              </svg>
             </div>
-          ) : (
-            <EmptyCard title="No buy events yet" detail="Buy volume will populate after real Torque buy events are emitted." />
-          )}
+          </div>
+          <div className="chart">
+            {sevenDayWindow.map((point) => (
+              <div className="bar-wrap" key={point.date}>
+                <div
+                  className={`bar${point.value > 0 ? " on" : ""}`}
+                  style={{ height: `${point.value > 0 ? Math.max(10, Math.round((point.value / Math.max(maxVolume, 1)) * 100)) : 14}%` }}
+                >
+                  {point.value === maxVolume && maxVolume > 0 ? <div className="peak-label">{formatSol(point.value)}</div> : null}
+                </div>
+                <div className="bar-label">{point.dayLabel}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "0 4px 4px", fontSize: 12, color: "var(--ink-dim)", letterSpacing: "-0.01em" }}>
+            {formatSol(totalBuySol)} total this week
+          </div>
         </div>
 
         <div className="card c-reminder">
@@ -353,18 +385,23 @@ export default function DashboardOverview() {
           </div>
           <div className="gauge-wrap">
             <svg width={220} height={140} viewBox="0 0 220 140">
-              <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#f1f5f9" strokeWidth={26} strokeLinecap="round" />
-              {visibleMigrationProgress > 0 && (
-                <path
-                  d="M 20 120 A 90 90 0 0 1 200 120"
-                  fill="none"
-                  pathLength="100"
-                  stroke="#ec4899"
-                  strokeDasharray={`${visibleMigrationProgress} 100`}
-                  strokeWidth={18}
-                  strokeLinecap="round"
-                />
-              )}
+              <defs>
+                <pattern id="migrationStripe" patternUnits="userSpaceOnUse" width={6} height={6} patternTransform="rotate(45)">
+                  <rect width={6} height={6} fill="#f1f3ee" />
+                  <rect width={3} height={6} fill="#e8eae5" />
+                </pattern>
+              </defs>
+              <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="url(#migrationStripe)" strokeWidth={26} strokeLinecap="round" />
+              {visibleMigrationProgress > 0 && (() => {
+                const end = gaugeArcEnd(visibleMigrationProgress);
+                const large = visibleMigrationProgress > 50 ? 1 : 0;
+                return (
+                  <>
+                    <path d={`M 20 120 A 90 90 0 ${large} 1 ${end.x} ${end.y}`} fill="none" stroke="#831843" strokeWidth={26} strokeLinecap="round" />
+                    <path d={`M 20 120 A 90 90 0 ${large} 1 ${end.x} ${end.y}`} fill="none" stroke="#ec4899" strokeWidth={16} strokeLinecap="round" />
+                  </>
+                );
+              })()}
             </svg>
             <div className="gauge-value">
               <div className="pct">{formatPct(migrationProgress)}</div>
@@ -378,17 +415,11 @@ export default function DashboardOverview() {
         </div>
 
         <div className="card dark tracker c-tracker">
-          <h3>Live Test State</h3>
-          <div className="time">{runtime}</div>
-          <div style={{ color: "rgba(255,255,255,0.68)", fontSize: 13 }}>
-            {launches.length > 0 && firstLaunchAt
-              ? `Running since ${firstLaunchAt.toLocaleString()}. Latest event ${formatRelative(latestEvent?.createdAt, now)}.`
-              : "Run a signed devnet launch to populate this workspace."}
-          </div>
-          <div className="tracker-metrics">
-            <span>{launches.length} launch{launches.length === 1 ? "" : "es"}</span>
-            <span>{buyEvents.length} buy event{buyEvents.length === 1 ? "" : "s"}</span>
-            <span>{acceptedEvents.length} accepted</span>
+          <h3>Uptime</h3>
+          <div className="time">{uptimeDisplay}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: healthTone, marginTop: 4 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", boxShadow: "0 0 6px currentColor", flexShrink: 0 }} />
+            {healthLabel}
           </div>
         </div>
       </div>

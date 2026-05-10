@@ -8,8 +8,16 @@ This file tracks anything that slows down the Raydium LaunchLab or Torque integr
 - Raydium LaunchLab browser signing/submission is wired; next step is running it with a funded injected devnet wallet.
 - Dashboard registry pages now start from an empty local API registry. Tables and analytics derive from real local API launch records, Torque event receipts, and Raydium pool IDs only.
 - Claim/leaderboard data source still needs confirmation: public landing-page endpoints where possible, backend-authenticated calls where required.
-- Torque recurring incentive creation preview works through MCP. Real creation/funding still needs explicit operator confirmation.
 - Torque custom-event fields are required at ingestion time and custom events allow at most 5 string fields. The local catalog now validates this before ingest.
+- Recurring incentive `cmp03y0i2029sk01hm3br7vld` is evaluating (May 10 8pm → May 11 9pm). Funding step happens after evaluation ends — Torque prepares the offer then presents the fund option. Pending fund of 0.0105 SOL from wallet `Dc12X...22MdL`.
+
+## Torque Funding Flow — Non-Obvious UX (feedback for Torque)
+
+- **Expected:** Fund the incentive upfront before the epoch starts, like a deposit.
+- **Actual:** The platform shows no "Fund" or "Deposit" button before or during evaluation. After the evaluation period ends, Torque prepares the offer and only then presents the funding option.
+- **Impact:** A builder creating their first incentive via MCP has no indication that funding is a post-evaluation step. The platform shows "0.01 Wallet Connected" in the rewards column with no further instruction, which reads as "already funded."
+- **Workaround:** Asked Torque on Telegram. Response: "Once the evaluation period is over the offer gets prepared and you'll be given the option to fund it."
+- **Suggestion for Torque:** Add a banner or tooltip on the incentive settings page clarifying that funding occurs after evaluation, not before. The current UI implies funding is a pre-requisite that's been missed.
 
 ## Resolved
 

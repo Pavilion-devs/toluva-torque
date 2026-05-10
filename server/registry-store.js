@@ -26,6 +26,8 @@ function normalizeLaunch(input) {
   return {
     sym,
     name,
+    description: typeof input.description === "string" ? input.description : "",
+    image: input.image || null,
     status: input.status || "draft",
     bonded: Number(input.bonded || 0),
     campaign: input.campaign || null,
@@ -36,6 +38,7 @@ function normalizeLaunch(input) {
     migrationState: input.migrationState || input.status || "draft",
     raydium: input.raydium || null,
     torque: input.torque || null,
+    creator: input.creator || null,
     createdAt: input.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

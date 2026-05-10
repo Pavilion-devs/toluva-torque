@@ -209,6 +209,8 @@ export async function launchDevnetToken({ wallet, launch }) {
   const launchRecord = await postJson("/api/launches", {
     sym: launch.symbol,
     name: launch.name,
+    description: launch.description || "",
+    image: launch.image || null,
     status: "bonding",
     bonded: 0,
     campaign: null,
@@ -217,6 +219,7 @@ export async function launchDevnetToken({ wallet, launch }) {
     age: "now",
     migrationTime: "New",
     migrationState: "bonding",
+    creator: wallet.address,
     raydium: {
       cluster: "devnet",
       mint: mint.publicKey.toBase58(),

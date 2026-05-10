@@ -1,5 +1,7 @@
 # Toluva
 
+![Toluva](public/image.png)
+
 Incentive-native LaunchLab platform for token launches with Torque campaigns attached from day one.
 
 ## Current State

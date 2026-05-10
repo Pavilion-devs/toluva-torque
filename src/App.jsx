@@ -6,6 +6,7 @@ import Footer from "./components/stripe/Footer";
 import DashboardLayout from "./components/dashboard/DashboardLayout";
 import DashboardOverview from "./components/dashboard/pages/DashboardOverview";
 import LaunchesPage from "./components/dashboard/pages/LaunchesPage";
+import TokenDetailPage from "./components/dashboard/pages/TokenDetailPage";
 import CampaignsPage from "./components/dashboard/pages/CampaignsPage";
 import AnalyticsPage from "./components/dashboard/pages/AnalyticsPage";
 import HistoryPage from "./components/dashboard/pages/HistoryPage";
@@ -27,6 +28,19 @@ const dashboardRoutes = {
   "/help": HelpPage,
 };
 
+function resolveRoute(pathname) {
+  if (dashboardRoutes[pathname]) {
+    return { Component: dashboardRoutes[pathname], props: {} };
+  }
+
+  const launchDetailMatch = pathname.match(/^\/launches\/([^/]+)$/);
+  if (launchDetailMatch) {
+    return { Component: TokenDetailPage, props: { sym: decodeURIComponent(launchDetailMatch[1]).toUpperCase() } };
+  }
+
+  return null;
+}
+
 function getPathname() {
   return typeof window === "undefined" ? "/" : window.location.pathname;
 }
@@ -36,19 +50,19 @@ export default function App() {
 
   React.useEffect(() => {
     const handleNavigation = () => setPathname(getPathname());
-
     window.addEventListener("popstate", handleNavigation);
     return () => window.removeEventListener("popstate", handleNavigation);
   }, []);
 
-  const DashboardPage = dashboardRoutes[pathname];
+  const route = resolveRoute(pathname);
 
-  if (DashboardPage) {
+  if (route) {
+    const { Component, props } = route;
     return (
       <>
         <GlobalStyles />
         <DashboardLayout pathname={pathname}>
-          <DashboardPage />
+          <Component {...props} />
         </DashboardLayout>
       </>
     );

@@ -9,18 +9,26 @@ This is the integration checklist for making Toluva measurable inside Torque.
 - `POST /api/events` reaches the Torque ingester.
 - MCP token is stored in local `.env` as `TORQUE_MCP_API_KEY`.
 - MCP tools work through `server/torque-mcp-wrapper.js` after calling `auth({ action: "login" })` with `TORQUE_MCP_API_KEY`.
-- Toluva project ID: `cmoom7gr80030jr1inh1hm91l`.
-- Attached custom events:
-  - `token_launch_created`: `cmooyf504003tjr1isr8cdwfs`
-  - `referral_clicked`: `cmooyn6xe004hjr1i2qz28y4p`
-  - `wallet_connected_to_launch`: `cmooyn7f2004pjr1inoizjhj2`
-  - `first_buy_completed`: `cmooypi8b0051jr1i49g8jaes`
-  - `launch_page_shared`: `cmop0m6gy006djr1i0wnhmanx`
-  - `buy_completed`: `cmop0m6s3006ljr1imt72c4f8`
-  - `migration_threshold_hit`: `cmop0m75f006tjr1isv294vdh`
-  - `token_migrated`: `cmop0m7ge0071jr1isw5nk7c7`
-  - `reward_claim_started`: `cmop0m7yi0079jr1itdmj9opv`
-  - `reward_claimed`: `cmop0m8rs007hjr1iasftm4p9`
+- Toluva project ID (active): `cmp03b5ml0274k01h12kf07dc`
+  - Previous project `cmoom7gr80030jr1inh1hm91l` is inaccessible — original wallet lost.
+- Attached custom events (new project):
+  - `token_launch_created`: `cmp03q6bx027dk01h757ryzxy`
+  - `launch_page_shared`: `cmp03q7a0027hk01hqn3a7ca0`
+  - `referral_clicked`: `cmp03q7t5027lk01hb40nn68l`
+  - `wallet_connected_to_launch`: `cmp03q87p027pk01hhxbiqm82`
+  - `first_buy_completed`: `cmp03q8iq027tk01hfb9tyfij`
+  - `buy_completed`: `cmp03q8su027xk01h4a47pn8z`
+  - `migration_threshold_hit`: `cmp03q91e0281k01hsu9d4s1j`
+  - `token_migrated`: `cmp03q99m0285k01hpsadvn6j`
+  - `reward_claim_started`: `cmp03q9i50289k01hv79f1lfy`
+  - `reward_claimed`: `cmp03q9pz028dk01htmnhs5wx`
+- **Recurring incentive created via MCP** (ID: `cmp03y0i2029sk01hm3br7vld`):
+  - Name: `Toluva Early Buyer Leaderboard`
+  - Type: leaderboard, emission: SOL, pool: 0.01 SOL + 0.0005 fee
+  - Evaluation: May 10 8:00 PM → May 11 9:00 PM
+  - Claim window: May 11 → May 24
+  - Formula: `RANK == 1 ? TOTAL_REWARD_POOL * 0.5 : RANK <= 3 ? TOTAL_REWARD_POOL * 0.25 : 0`
+  - Status: evaluating — fund after epoch ends at platform.torque.so/cmp03b5ml0274k01h12kf07dc/incentives
 
 ## Credentials Needed
 
