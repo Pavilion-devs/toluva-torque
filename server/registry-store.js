@@ -327,12 +327,9 @@ export async function recordEvent(input) {
 
     if (row.type === "first_buy_completed" || row.type === "buy_completed") {
       const token = String(row.token || "").toUpperCase();
-      await supabase
-        .from("launches")
-        .update({ buyers: supabase.rpc ? undefined : undefined, updated_at: new Date().toISOString() })
-        .eq("sym", token)
-        .catch(() => {});
-      await supabase.rpc("increment_buyers", { p_sym: token }).catch(() => {});
+      try {
+        await supabase.rpc("increment_buyers", { p_sym: token });
+      } catch {}
     }
 
     return eventFromRow(data);
