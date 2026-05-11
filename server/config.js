@@ -57,6 +57,8 @@ export const config = {
     eventApiKey: firstSet(process.env.TORQUE_EVENT_API_KEY, process.env.TORQUE_API_KEY),
     eventIngestUrl: process.env.TORQUE_EVENT_INGEST_URL || "https://ingest.torque.so/events",
     projectId: firstSet(process.env.TORQUE_PROJECT_ID),
+    recurringOfferId: firstSet(process.env.TORQUE_RECURRING_OFFER_ID),
+    serverBaseUrl: "https://server.torque.so",
     strictEvents: process.env.TORQUE_STRICT_EVENTS === "true",
   },
   solana: {

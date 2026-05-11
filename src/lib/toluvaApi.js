@@ -8,6 +8,28 @@ export function requireApiBaseUrl() {
   return apiBaseUrl;
 }
 
+export async function getJson(path) {
+  const response = await fetch(`${requireApiBaseUrl()}${path}`, {
+    headers: { Accept: "application/json" },
+  });
+  return response.json().catch(() => ({}));
+}
+
+export async function fetchLeaderboard() {
+  const data = await getJson("/api/torque/leaderboard");
+  return data?.data?.results || [];
+}
+
+export async function fetchClaimDetails(wallet) {
+  if (!wallet) return [];
+  const data = await getJson(`/api/torque/claim-details?wallet=${encodeURIComponent(wallet)}`);
+  return data?.data || [];
+}
+
+export async function triggerClaim(wallet) {
+  return postJson("/api/torque/claim", { wallet });
+}
+
 export async function postJson(path, body) {
   const response = await fetch(`${requireApiBaseUrl()}${path}`, {
     method: "POST",

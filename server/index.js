@@ -294,6 +294,48 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/torque/leaderboard") {
+      const { projectId, recurringOfferId, serverBaseUrl } = config.torque;
+      if (!projectId || !recurringOfferId) {
+        sendJson(res, 200, { status: "SUCCESS", data: { results: [], total: 0 } });
+        return;
+      }
+      const url = `${serverBaseUrl}/project/${projectId}/recurring-offer/${recurringOfferId}/latest-eval-results?limit=200`;
+      const upstream = await fetch(url);
+      sendJson(res, upstream.status, await upstream.json().catch(() => ({})));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/torque/claim-details") {
+      const { projectId, serverBaseUrl } = config.torque;
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const wallet = url.searchParams.get("wallet");
+      if (!projectId || !wallet) {
+        sendJson(res, 400, { error: "projectId config and wallet param are required." });
+        return;
+      }
+      const upstream = await fetch(
+        `${serverBaseUrl}/claim/details/byOffer?projectId=${projectId}&offerStatus=ACTIVE&wallet=${encodeURIComponent(wallet)}`
+      );
+      sendJson(res, upstream.status, await upstream.json().catch(() => ({})));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/torque/claim") {
+      const { projectId, serverBaseUrl } = config.torque;
+      const body = await readBody(req);
+      const wallet = body.wallet;
+      if (!projectId || !wallet) {
+        sendJson(res, 400, { error: "wallet is required." });
+        return;
+      }
+      const upstream = await fetch(
+        `${serverBaseUrl}/claim?projectId=${projectId}&wallet=${encodeURIComponent(wallet)}`
+      );
+      sendJson(res, upstream.status, await upstream.json().catch(() => ({})));
+      return;
+    }
+
     sendJson(res, 404, { error: `No route for ${req.method} ${pathname}.` });
   } catch (error) {
     sendError(res, error);
