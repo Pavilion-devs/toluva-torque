@@ -60,19 +60,28 @@ function assertInjectedSigner(wallet) {
   return provider;
 }
 
+const ATA_RENT_LAMPORTS = 2_039_280;
+const FEE_BUFFER_LAMPORTS = 1_000_000;
+
 function simulationErrorMessage(simulation) {
   const err = simulation?.value?.err;
   const logs = simulation?.value?.logs || [];
-  const tail = logs.slice(-6).join(" | ");
 
   if (!err) {
     return null;
   }
 
-  return `Raydium transaction simulation failed before wallet signing: ${JSON.stringify(err)}${tail ? ` (${tail})` : ""}`;
+  const insufficientMatch = logs.join(" ").match(/insufficient lamports (\d+), need (\d+)/);
+  if (insufficientMatch) {
+    const has = (Number(insufficientMatch[1]) / 1_000_000_000).toFixed(4);
+    const need = (Number(insufficientMatch[2]) / 1_000_000_000).toFixed(4);
+    return `Insufficient devnet SOL: wallet has ${has} SOL but this transaction needs ${need} SOL. Top up your devnet wallet or choose a smaller amount.`;
+  }
+
+  return `Raydium transaction simulation failed: ${JSON.stringify(err)}`;
 }
 
-async function assertDevnetWalletReady(connection, address, diagnostics) {
+async function assertDevnetWalletReady(connection, address, diagnostics, requiredLamports = MIN_CREATOR_LAMPORTS) {
   const pubkey = new PublicKey(address);
   diagnostics.stage = "wallet_check";
   const account = await connection.getAccountInfo(pubkey, "confirmed");
@@ -85,10 +94,13 @@ async function assertDevnetWalletReady(connection, address, diagnostics) {
   }
 
   diagnostics.balanceSol = account.lamports / 1_000_000_000;
+  const needed = Math.max(MIN_CREATOR_LAMPORTS, requiredLamports);
 
-  if (account.lamports < MIN_CREATOR_LAMPORTS) {
+  if (account.lamports < needed) {
+    const hasSol = (account.lamports / 1_000_000_000).toFixed(4);
+    const needSol = (needed / 1_000_000_000).toFixed(4);
     throwWithDiagnostics(
-      `This wallet only has ${(account.lamports / 1_000_000_000).toFixed(4)} devnet SOL. Fund it with at least 0.05 devnet SOL before launching.`,
+      `Insufficient devnet SOL: wallet has ${hasSol} SOL but this transaction needs ~${needSol} SOL. Top up your devnet wallet or choose a smaller amount.`,
       diagnostics,
     );
   }
@@ -270,7 +282,8 @@ export async function buyDevnetToken({ wallet, launch, buyAmount }) {
     throwWithDiagnostics("This launch is missing Raydium mint or pool data.", diagnostics);
   }
 
-  await assertDevnetWalletReady(connection, wallet.address, diagnostics);
+  const requiredLamports = Number(buyAmount) + ATA_RENT_LAMPORTS + FEE_BUFFER_LAMPORTS;
+  await assertDevnetWalletReady(connection, wallet.address, diagnostics, requiredLamports);
 
   diagnostics.stage = "build_buy_transaction";
   const build = await postJson("/api/raydium/launches/build-buy-transaction", {
