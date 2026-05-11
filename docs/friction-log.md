@@ -11,6 +11,15 @@ This file tracks anything that slows down the Raydium LaunchLab or Torque integr
 - Torque custom-event fields are required at ingestion time and custom events allow at most 5 string fields. The local catalog now validates this before ingest.
 - Recurring incentive `cmp03y0i2029sk01hm3br7vld` is evaluating (May 10 8pm → May 11 9pm). Funding step happens after evaluation ends — Torque prepares the offer then presents the fund option. Pending fund of 0.0105 SOL from wallet `Dc12X...22MdL`.
 
+## Torque "Failed to fund distributor" — Recurring Bug (feedback for Torque)
+
+- **Occurrences:** 3 separate incentives hit this error (`cmp03y0i2029sk01hm3br7vld`, `cmp0b7jsr02pdk01h9ngoch4p`, `cmp1svd9105cmk01h1dbsrykz`).
+- **Symptom:** Clicking "Add Funds" on a Claiming epoch returns "Failed to fund distributor". Wallet has sufficient SOL. Epoch shows correct participant count.
+- **Pattern:** Every affected epoch has the eval period displayed as "May 10 – May 10" (same-day, often backwards relative to expected). Likely the distributor contract is initialised with an invalid date range, preventing the fund deposit.
+- **Workaround:** Each time, the Torque team manually fixed the distributor on their backend and the funding succeeded after.
+- **Impact:** Blocks the entire incentive funding flow until team intervenes. Cannot be self-served by builders.
+- **Suggestion for Torque:** Validate epoch date ranges at creation time and surface a clear error if the distributor cannot be initialised. Add a self-serve "retry funding" or "recreate distributor" button for builders who hit this state.
+
 ## Torque Epoch Timezone Bug — Confirmed by Torque Team (feedback for Torque)
 
 - **What failed:** Two consecutive epoch failures with `Cannot create audience: query returned 0 rows. Query status: COMPLETED`.
