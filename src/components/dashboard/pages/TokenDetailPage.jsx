@@ -1,8 +1,9 @@
 import React from "react";
-import Link from "../Link";
+import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
+import { postJson } from "../../../lib/toluvaApi";
 
 const BUY_PRESETS_SOL  = ["0.01", "0.05", "0.1", "0.5"];
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -66,6 +67,202 @@ function formatSol(amount) {
   if (amount < 0.001) return `${amount.toFixed(6)} SOL`;
   if (amount < 1) return `${amount.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")} SOL`;
   return `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} SOL`;
+}
+
+const CAMPAIGN_TEMPLATES = [
+  {
+    id: "early-buyer",
+    name: "Early Buyer Leaderboard",
+    description: "Top buyers ranked by volume split a fixed SOL pool. Powered by first_buy_completed events.",
+    accent: "#ec4899",
+    accentBg: "#fce7f3",
+    info: "Torque Early Buyer Leaderboard",
+    pool: "0.01",
+  },
+  {
+    id: "referral-raffle",
+    name: "Referral Raffle",
+    description: "Wallets that refer buyers earn raffle tickets. Torque draws and pays winners automatically.",
+    accent: "#7c3aed",
+    accentBg: "#ede9fe",
+    info: "Torque Referral Raffle",
+    pool: "0.01",
+  },
+  {
+    id: "migration-sprint",
+    name: "Migration Sprint",
+    description: "Reward wallets that push the bonding curve toward 100% before the deadline.",
+    accent: "#4f46e5",
+    accentBg: "#e0e7ff",
+    info: "Torque Migration Sprint",
+    pool: "0.01",
+  },
+];
+
+function AttachCampaignModal({ launch, onClose, onAttached }) {
+  const [selected, setSelected] = React.useState(null);
+  const [state, setState] = React.useState({ status: "idle", error: null });
+
+  async function handleAttach() {
+    if (!selected) return;
+    setState({ status: "submitting", error: null });
+    try {
+      const template = CAMPAIGN_TEMPLATES.find((t) => t.id === selected);
+      await postJson("/api/campaigns", {
+        type: selected,
+        launch: launch.sym,
+        status: "live",
+        pool: template.pool,
+        info: template.info,
+        accent: selected === "early-buyer" ? "pink" : selected === "referral-raffle" ? "violet" : "indigo",
+        torque: { recurringOfferId: null, eventSource: "first_buy_completed" },
+      });
+      setState({ status: "done", error: null });
+      onAttached?.();
+      setTimeout(onClose, 800);
+    } catch (err) {
+      setState({ status: "idle", error: err.message || "Failed to attach campaign." });
+    }
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)",
+    }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: "#fff", borderRadius: 20, padding: 28, width: "100%", maxWidth: 540,
+        boxShadow: "0 24px 64px rgba(15,23,42,0.18)", display: "flex", flexDirection: "column", gap: 20,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#ec4899", marginBottom: 4 }}>
+              Powered by Torque
+            </div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--ink)" }}>
+              Attach campaign to ${launch.sym}
+            </h2>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 20, lineHeight: 1 }}>✕</button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {CAMPAIGN_TEMPLATES.map((template) => {
+            const isSelected = selected === template.id;
+            return (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => setSelected(template.id)}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px",
+                  border: `1.5px solid ${isSelected ? template.accent + "66" : "var(--line)"}`,
+                  borderRadius: 14, cursor: "pointer", textAlign: "left",
+                  background: isSelected ? template.accentBg : "#fff",
+                  transition: "all 120ms",
+                }}
+              >
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                  background: template.accentBg, display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `1px solid ${template.accent}33`,
+                }}>
+                  <span style={{ fontSize: 16 }}>{template.id === "early-buyer" ? "🏆" : template.id === "referral-raffle" ? "🎟️" : "🚀"}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", marginBottom: 3 }}>{template.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-dim)", lineHeight: 1.4 }}>{template.description}</div>
+                </div>
+                {isSelected && (
+                  <div style={{ width: 18, height: 18, borderRadius: "50%", background: template.accent, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width={10} height={10} viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="#fff" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {state.error && (
+          <div style={{ background: "#fff1f2", border: "1px solid #fecdd3", color: "#9f1239", fontSize: 12, padding: "10px 14px", borderRadius: 10 }}>
+            {state.error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onClose} className="btn ghost" style={{ flex: 1, justifyContent: "center" }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={handleAttach}
+            disabled={!selected || state.status === "submitting" || state.status === "done"}
+            style={{ flex: 2, justifyContent: "center" }}
+          >
+            {state.status === "submitting" ? "Attaching…" : state.status === "done" ? "Attached ✓" : "Attach campaign"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CampaignCard({ launch, onAttached }) {
+  const [showModal, setShowModal] = React.useState(false);
+
+  return (
+    <>
+      <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>Torque campaign</h3>
+          {!launch.campaign && (
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              style={{
+                fontSize: 12, fontWeight: 600, color: "var(--green)", cursor: "pointer",
+                padding: "5px 11px", borderRadius: 999, background: "var(--green-pale)",
+                border: "1px solid var(--green-light)", fontFamily: "inherit",
+              }}
+            >
+              + Attach campaign
+            </button>
+          )}
+        </div>
+
+        {launch.campaign ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              background: "var(--green-pale)", color: "var(--green)", padding: "7px 13px",
+              borderRadius: 999, fontSize: 12, fontWeight: 600, border: "1px solid var(--green-light)",
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
+              {launch.campaign}
+            </div>
+            <Link href="/incentives" style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-dim)", textDecoration: "none" }}>
+              View leaderboard →
+            </Link>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--ink-dim)", lineHeight: 1.5 }}>
+            No incentive attached yet. Attach an early-buyer leaderboard, referral raffle, or migration sprint to drive activity into this launch.
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <AttachCampaignModal
+          launch={launch}
+          onClose={() => setShowModal(false)}
+          onAttached={onAttached}
+        />
+      )}
+    </>
+  );
 }
 
 function BuyPanel({ launch, wallet, onBought }) {
@@ -391,33 +588,7 @@ export default function TokenDetailPage({ sym }) {
           </div>
 
           {/* Campaign */}
-          <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>Torque campaign</h3>
-              {!launch.campaign && (
-                <Link href="/incentives" style={{
-                  fontSize: 12, fontWeight: 600, color: "var(--green)", textDecoration: "none",
-                  padding: "5px 11px", borderRadius: 999, background: "var(--green-pale)", border: "1px solid var(--green-light)",
-                }}>
-                  + Attach campaign
-                </Link>
-              )}
-            </div>
-            {launch.campaign ? (
-              <div style={{
-                display: "inline-flex", alignItems: "center", gap: 8, alignSelf: "flex-start",
-                background: "var(--green-pale)", color: "var(--green)", padding: "7px 13px",
-                borderRadius: 999, fontSize: 12, fontWeight: 600, border: "1px solid var(--green-light)",
-              }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
-                {launch.campaign}
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: "var(--ink-dim)", lineHeight: 1.5 }}>
-                No incentive attached yet. Attach an early-buyer leaderboard, referral raffle, or migration sprint to drive activity into this launch.
-              </div>
-            )}
-          </div>
+          <CampaignCard launch={launch} onAttached={() => refreshRegistry({ force: true })} />
 
           {/* Recent activity */}
           <div className="card" style={{ padding: 22 }}>

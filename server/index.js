@@ -1,6 +1,7 @@
 import http from "node:http";
 import { config, integrationReadiness } from "./config.js";
 import {
+  attachCampaignToLaunch,
   createCampaign,
   createLaunch,
   getCampaignResults,
@@ -175,7 +176,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/campaigns") {
-      const campaign = await createCampaign(await readBody(req));
+      const body = await readBody(req);
+      const campaign = await createCampaign(body);
+      if (body.launch) await attachCampaignToLaunch(body.launch, campaign);
       sendJson(res, 201, { campaign });
       return;
     }

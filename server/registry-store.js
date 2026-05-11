@@ -387,6 +387,26 @@ export async function hasBuyEventForWallet({ token, wallet }) {
   });
 }
 
+export async function attachCampaignToLaunch(launchSym, campaign) {
+  const sym = String(launchSym || "").trim().toUpperCase();
+  if (!sym) return;
+
+  const label = campaign.type === "early-buyer" ? "Early Buyer Leaderboard"
+    : campaign.type === "referral-raffle" ? "Referral Raffle"
+    : campaign.type === "migration-sprint" ? "Migration Sprint"
+    : campaign.type;
+
+  if (supabase) {
+    await supabase.from("launches").update({ campaign: label, updated_at: new Date().toISOString() }).eq("sym", sym);
+    return;
+  }
+
+  await updateFileRegistry((registry) => {
+    const launch = (registry.launches || []).find((l) => l.sym === sym);
+    if (launch) { launch.campaign = label; launch.updatedAt = new Date().toISOString(); }
+  });
+}
+
 export async function getCampaignResults(id) {
   const campaignId = Number(id);
 
