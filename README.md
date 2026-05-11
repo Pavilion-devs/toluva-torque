@@ -2,23 +2,16 @@
 
 ![Toluva](public/image.png)
 
-Incentive-native LaunchLab platform for token launches with Torque campaigns attached from day one.
+Incentive-native token launchpad built on Raydium LaunchLab. Every launch ships with Torque-powered growth campaigns attached from day one — early buyer leaderboards, referral raffles, and migration sprints.
 
-## Current State
+## What's Built
 
-This repo is a Vite React app with:
-
-- landing page and dashboard UI;
-- a file-backed registry at `data/launch-registry.json`;
-- a small local API at `server/index.js`;
-- a frontend registry facade at `src/lib/launchRegistry.js` that reads the API and falls back to the local seed;
-- injected Solana wallet detection with a demo-wallet fallback;
-- backend integration status/prep routes for Torque, Solana RPC, and Raydium LaunchLab;
-- placeholder data shaped for LaunchLab launches, Torque campaigns, live events, and analytics.
-
-Torque event emission is wired behind the local API. Without a Torque API key, events are recorded locally as `torque_skipped`; with `TORQUE_EVENT_API_KEY` or `TORQUE_API_KEY`, the backend posts custom events to the configured Torque ingest URL and stores the receipt.
-
-Raydium LaunchLab transaction building is staged behind prep/status routes. The next phase is adding the Raydium SDK dependencies and wallet-signed transaction flow on devnet.
+- Token launch through Raydium LaunchLab on devnet — real bonding curve, real pool, real on-chain transaction
+- Buy flow with wallet signing, devnet submission, and live pool state decoding
+- 10 Torque custom events emitted across the full launch lifecycle (`token_launch_created` → `first_buy_completed` → `token_migrated` → `reward_claimed`)
+- Recurring leaderboard incentive created via Torque MCP, funded on mainnet, with real recipient allocations
+- Creator dashboard: bonding curve progress, buy history, early buyer leaderboard, event receipts
+- Friction log documenting every Raydium and Torque integration rough edge (`docs/friction-log.md`)
 
 ## Run Locally
 
@@ -27,22 +20,25 @@ npm install
 npm run dev
 ```
 
-Then open the local Vite URL, usually `http://localhost:5173`.
-
-Run API and web together:
+Starts both the API (port 8787) and frontend (port 5173) together.
 
 ```bash
-npm run dev:all
+npm run api      # API only
+npm run dev:web  # frontend only
 ```
 
-Run only the API:
+## Environment Variables
 
-```bash
-npm run api
+Copy `.env.example` to `.env` and fill in:
+
+```
+TORQUE_EVENT_API_KEY=   # from platform.torque.so/developer
+TORQUE_MCP_API_KEY=     # from platform.torque.so/connect-mcp
+TORQUE_PROJECT_ID=      # your Torque project ID
+SOLANA_CLUSTER=devnet
 ```
 
-API docs live in `docs/api.md`.
-Torque MCP setup notes live in `docs/torque-mcp-runbook.md`.
+Without `TORQUE_EVENT_API_KEY`, events record locally as `torque_skipped` instead of reaching Torque — the dashboard still works.
 
 ## Build
 
@@ -50,22 +46,23 @@ Torque MCP setup notes live in `docs/torque-mcp-runbook.md`.
 npm run build
 ```
 
-## Deploy Frontend
+## Deploy
 
-The app is a Vite SPA. `vercel.json` rewrites client routes such as `/dashboard`, `/launches`, and `/campaigns` back to `index.html` so direct refreshes do not 404.
+**Frontend — Vercel**
 
-Vercel settings:
-
-- Framework preset: `Vite`
-- Install command: `npm install`
+`vercel.json` handles SPA routing. Settings:
+- Framework: `Vite`
 - Build command: `npm run build`
 - Output directory: `dist`
+- Set `VITE_TOLUVA_API_URL` to your deployed API URL
 
-## Integration Targets
+**Backend — Railway**
 
-- Raydium LaunchLab devnet token launch flow.
-- Launch registry persisted by backend storage.
-- Torque custom event emission.
-- Torque recurring incentive creation.
-- Public launch page with leaderboard and claim status.
-- Friction log for Torque/Raydium docs and API gaps.
+See deployment guide below. Set the same env vars as above plus `PORT` (Railway injects this automatically).
+
+## Docs
+
+- `docs/api.md` — API route reference
+- `docs/friction-log.md` — Raydium and Torque integration friction log
+- `docs/torque-mcp-runbook.md` — Torque MCP setup and event/incentive IDs
+- `docs/devnet-proof.md` — First devnet launch proof (token TLV741, real pool and tx)

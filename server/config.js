@@ -69,6 +69,10 @@ export const config = {
     commitment: process.env.SOLANA_COMMITMENT || "confirmed",
     statusTimeoutMs: numberFromEnv(process.env.SOLANA_STATUS_TIMEOUT_MS, 4000),
   },
+  supabase: {
+    url: firstSet(process.env.SUPABASE_URL),
+    serviceRoleKey: firstSet(process.env.SUPABASE_SERVICE_ROLE_KEY),
+  },
 };
 
 const raydiumCluster = normalizedCluster(firstSet(process.env.RAYDIUM_CLUSTER, config.solana.cluster));

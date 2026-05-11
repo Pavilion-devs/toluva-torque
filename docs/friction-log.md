@@ -11,6 +11,14 @@ This file tracks anything that slows down the Raydium LaunchLab or Torque integr
 - Torque custom-event fields are required at ingestion time and custom events allow at most 5 string fields. The local catalog now validates this before ingest.
 - Recurring incentive `cmp03y0i2029sk01hm3br7vld` is evaluating (May 10 8pm → May 11 9pm). Funding step happens after evaluation ends — Torque prepares the offer then presents the fund option. Pending fund of 0.0105 SOL from wallet `Dc12X...22MdL`.
 
+## Torque Epoch Timezone Bug — Confirmed by Torque Team (feedback for Torque)
+
+- **What failed:** Two consecutive epoch failures with `Cannot create audience: query returned 0 rows. Query status: COMPLETED`.
+- **Root cause (confirmed by Torque):** The platform displays times in the user's local timezone (WAT = UTC+1), but epoch evaluation windows are stored and executed in UTC. When the epoch was set up via the platform, the start/end times were shifted by 1 hour relative to when the events were actually ingested. The events landed at e.g. 18:00 UTC but the epoch window was 19:00–20:00 UTC, so 0 rows matched.
+- **What made it hard to diagnose:** `preview_incentive_query` run manually returned 1 row of real data for the same event ID and date range — meaning the data existed but the epoch's stored UTC window didn't cover it.
+- **Resolution:** Torque team manually corrected the evaluation period and triggered the incentive.
+- **Suggestion for Torque:** Show UTC times explicitly alongside local times in the epoch timing UI, or validate that the epoch window actually contains ingested data before confirming creation. A builder with no visibility into this offset will hit the same failure silently every time.
+
 ## Torque Funding Flow — Non-Obvious UX (feedback for Torque)
 
 - **Expected:** Fund the incentive upfront before the epoch starts, like a deposit.

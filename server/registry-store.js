@@ -2,6 +2,20 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 
+// ─── Supabase client (optional) ───────────────────────────────────────────────
+
+let supabase = null;
+
+if (config.supabase.url && config.supabase.serviceRoleKey) {
+  const { createClient } = await import("@supabase/supabase-js");
+  supabase = createClient(config.supabase.url, config.supabase.serviceRoleKey);
+  console.log("Registry: using Supabase.");
+} else {
+  console.log("Registry: using file-backed store (no Supabase config).");
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const registryPath = config.registry.path;
 const seedRegistryPath = config.registry.seedPath;
 
@@ -13,16 +27,93 @@ function nextId(items) {
   return items.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0) + 1;
 }
 
-function normalizeLaunch(input) {
+function dbErr(label, error) {
+  const err = new Error(`Supabase ${label} failed: ${error?.message || JSON.stringify(error)}`);
+  err.status = 500;
+  throw err;
+}
+
+// ─── Row mappers (snake_case DB → camelCase app) ──────────────────────────────
+
+function launchFromRow(row) {
+  return {
+    sym: row.sym,
+    name: row.name,
+    description: row.description ?? "",
+    image: row.image ?? null,
+    status: row.status,
+    bonded: row.bonded ?? 0,
+    campaign: row.campaign ?? null,
+    buyers: row.buyers ?? 0,
+    pool: row.pool ?? null,
+    age: row.age,
+    migrationTime: row.migration_time,
+    migrationState: row.migration_state,
+    raydium: row.raydium ?? null,
+    torque: row.torque ?? null,
+    creator: row.creator ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function campaignFromRow(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    launch: row.launch,
+    status: row.status,
+    pool: row.pool,
+    paid: row.paid,
+    progress: row.progress,
+    info: row.info,
+    state: row.state,
+    accent: row.accent,
+    torque: row.torque ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function eventFromRow(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    token: row.token ?? null,
+    wallet: row.wallet ?? null,
+    payload: row.payload ?? {},
+    torqueRequest: row.torque_request ?? null,
+    torqueReceipt: row.torque_receipt ?? null,
+    torqueError: row.torque_error ?? null,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+function liveEventFromEvent(event) {
+  const token = event.token ? String(event.token).toUpperCase() : null;
+  const wallet = event.wallet ? `${event.wallet.slice(0, 5)}…${event.wallet.slice(-4)}` : "unknown wallet";
+  return {
+    type: event.type.includes("claim") ? "claim" : event.type.includes("referral") ? "raffle" : "sprint",
+    token,
+    time: "now",
+    line: [
+      { text: wallet, className: "font-mono" },
+      { text: ` emitted ${event.type.replaceAll("_", " ")}` },
+    ],
+  };
+}
+
+// ─── Normalizers (input → DB insert shape) ────────────────────────────────────
+
+function normalizeLaunchInsert(input) {
   const sym = String(input.sym || input.symbol || "").trim().toUpperCase();
   const name = String(input.name || "").trim();
-
   if (!sym || !name) {
     const error = new Error("Launch requires `sym` and `name`.");
     error.status = 400;
     throw error;
   }
-
   return {
     sym,
     name,
@@ -34,28 +125,25 @@ function normalizeLaunch(input) {
     buyers: Number(input.buyers || 0),
     pool: input.pool || null,
     age: input.age || "Draft",
-    migrationTime: input.migrationTime || "Draft",
-    migrationState: input.migrationState || input.status || "draft",
+    migration_time: input.migrationTime || input.migration_time || "Draft",
+    migration_state: input.migrationState || input.migration_state || input.status || "draft",
     raydium: input.raydium || null,
     torque: input.torque || null,
     creator: input.creator || null,
-    createdAt: input.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    created_at: input.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 }
 
-function normalizeCampaign(input, campaigns) {
+function normalizeCampaignInsert(input) {
   const type = String(input.type || "").trim();
   const launch = String(input.launch || input.sym || "").trim().toUpperCase();
-
   if (!type || !launch) {
     const error = new Error("Campaign requires `type` and `launch`.");
     error.status = 400;
     throw error;
   }
-
   return {
-    id: input.id || nextId(campaigns),
     type,
     launch,
     status: input.status || "scheduled",
@@ -66,70 +154,75 @@ function normalizeCampaign(input, campaigns) {
     state: input.state || "Scheduled",
     accent: input.accent || "pink",
     torque: input.torque || null,
-    createdAt: input.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    created_at: input.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 }
 
-function normalizeEvent(input) {
+function normalizeEventInsert(input) {
   const type = String(input.type || input.eventType || "").trim();
-
   if (!type) {
     const error = new Error("Event requires `type`.");
     error.status = 400;
     throw error;
   }
-
   return {
     id: input.id || `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     type,
     token: input.token || input.launch || null,
     wallet: input.wallet || null,
     payload: input.payload || {},
-    torqueRequest: input.torqueRequest || null,
-    torqueReceipt: input.torqueReceipt || null,
-    torqueError: input.torqueError || null,
+    torque_request: input.torqueRequest || null,
+    torque_receipt: input.torqueReceipt || null,
+    torque_error: input.torqueError || null,
     status: input.status || "recorded",
-    createdAt: input.createdAt || new Date().toISOString(),
+    created_at: input.createdAt || new Date().toISOString(),
   };
 }
 
-function liveEventFromReceipt(event) {
-  const token = event.token ? String(event.token).toUpperCase() : null;
-  const wallet = event.wallet ? `${event.wallet.slice(0, 5)}…${event.wallet.slice(-4)}` : "unknown wallet";
+// ─── Supabase registry ────────────────────────────────────────────────────────
+
+async function readSupabaseRegistry() {
+  const [launchRes, campaignRes, eventRes] = await Promise.all([
+    supabase.from("launches").select("*").order("created_at", { ascending: false }),
+    supabase.from("campaigns").select("*").order("created_at", { ascending: false }),
+    supabase.from("event_receipts").select("*").order("created_at", { ascending: false }).limit(200),
+  ]);
+
+  if (launchRes.error) dbErr("launches select", launchRes.error);
+  if (campaignRes.error) dbErr("campaigns select", campaignRes.error);
+  if (eventRes.error) dbErr("event_receipts select", eventRes.error);
+
+  const launches = (launchRes.data || []).map(launchFromRow);
+  const campaigns = (campaignRes.data || []).map(campaignFromRow);
+  const eventReceipts = (eventRes.data || []).map(eventFromRow);
 
   return {
-    type: event.type.includes("claim") ? "claim" : event.type.includes("referral") ? "raffle" : "sprint",
-    icon: event.type.includes("claim")
-      ? "solar:cup-star-bold"
-      : event.type.includes("referral")
-        ? "solar:ticket-bold"
-        : "solar:bolt-bold",
-    token,
-    time: "now",
-    line: [
-      { text: wallet, className: "font-mono" },
-      { text: ` emitted ${event.type.replaceAll("_", " ")}` },
-    ],
+    workspace: { name: "Toluva Studio", cluster: "devnet" },
+    source: "supabase",
+    launches,
+    campaigns,
+    liveEvents: eventReceipts.slice(0, 20).map(liveEventFromEvent),
+    eventReceipts,
+    campaignResults: [],
   };
 }
 
-export async function readRegistry() {
+// ─── File-backed registry (fallback) ─────────────────────────────────────────
+
+async function readFileRegistry() {
   try {
     const raw = await readFile(registryPath, "utf8");
     return JSON.parse(raw);
   } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-
+    if (error.code !== "ENOENT") throw error;
     const seed = JSON.parse(await readFile(seedRegistryPath, "utf8"));
-    await writeRegistry(seed);
+    await writeFileRegistry(seed);
     return seed;
   }
 }
 
-export async function writeRegistry(nextRegistry) {
+async function writeFileRegistry(nextRegistry) {
   await mkdir(path.dirname(registryPath), { recursive: true });
   const tmpPath = `${registryPath}.${process.pid}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(nextRegistry, null, 2)}\n`, "utf8");
@@ -137,86 +230,196 @@ export async function writeRegistry(nextRegistry) {
   return nextRegistry;
 }
 
-export async function updateRegistry(updater) {
-  const current = await readRegistry();
+async function updateFileRegistry(updater) {
+  const current = await readFileRegistry();
   const draft = clone(current);
   const result = await updater(draft);
-  await writeRegistry(draft);
+  await writeFileRegistry(draft);
   return result ?? draft;
 }
 
-export async function createLaunch(input) {
-  return updateRegistry((registry) => {
-    const launch = normalizeLaunch(input);
-    const existing = registry.launches.find((item) => item.sym === launch.sym);
+// ─── Public API ───────────────────────────────────────────────────────────────
 
+export async function readRegistry() {
+  if (supabase) return readSupabaseRegistry();
+  return readFileRegistry();
+}
+
+export async function createLaunch(input) {
+  if (supabase) {
+    const row = normalizeLaunchInsert(input);
+    const { data: existing } = await supabase.from("launches").select("sym").eq("sym", row.sym).maybeSingle();
     if (existing) {
-      const error = new Error(`Launch ${launch.sym} already exists.`);
+      const error = new Error(`Launch ${row.sym} already exists.`);
       error.status = 409;
       throw error;
     }
+    const { data, error } = await supabase.from("launches").insert(row).select().single();
+    if (error) dbErr("launches insert", error);
+    return launchFromRow(data);
+  }
 
+  return updateFileRegistry((registry) => {
+    const sym = String(input.sym || input.symbol || "").trim().toUpperCase();
+    const name = String(input.name || "").trim();
+    if (!sym || !name) {
+      const error = new Error("Launch requires `sym` and `name`.");
+      error.status = 400;
+      throw error;
+    }
+    const existing = registry.launches.find((item) => item.sym === sym);
+    if (existing) {
+      const error = new Error(`Launch ${sym} already exists.`);
+      error.status = 409;
+      throw error;
+    }
+    const launch = {
+      sym, name,
+      description: typeof input.description === "string" ? input.description : "",
+      image: input.image || null, status: input.status || "draft",
+      bonded: Number(input.bonded || 0), campaign: input.campaign || null,
+      buyers: Number(input.buyers || 0), pool: input.pool || null,
+      age: input.age || "Draft", migrationTime: input.migrationTime || "Draft",
+      migrationState: input.migrationState || input.status || "draft",
+      raydium: input.raydium || null, torque: input.torque || null,
+      creator: input.creator || null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
     registry.launches.unshift(launch);
     return launch;
   });
 }
 
 export async function createCampaign(input) {
-  return updateRegistry((registry) => {
-    const campaign = normalizeCampaign(input, registry.campaigns);
+  if (supabase) {
+    const row = normalizeCampaignInsert(input);
+    const { data, error } = await supabase.from("campaigns").insert(row).select().single();
+    if (error) dbErr("campaigns insert", error);
+    return campaignFromRow(data);
+  }
+
+  return updateFileRegistry((registry) => {
+    const type = String(input.type || "").trim();
+    const launch = String(input.launch || input.sym || "").trim().toUpperCase();
+    if (!type || !launch) {
+      const error = new Error("Campaign requires `type` and `launch`.");
+      error.status = 400;
+      throw error;
+    }
+    const campaign = {
+      id: nextId(registry.campaigns), type, launch,
+      status: input.status || "scheduled", pool: String(input.pool || "0.0"),
+      paid: String(input.paid || "0.0"), progress: Number(input.progress || 0),
+      info: input.info || "Pending Torque setup", state: input.state || "Scheduled",
+      accent: input.accent || "pink", torque: input.torque || null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
     registry.campaigns.unshift(campaign);
     return campaign;
   });
 }
 
 export async function recordEvent(input) {
-  return updateRegistry((registry) => {
-    const event = normalizeEvent(input);
+  if (supabase) {
+    const row = normalizeEventInsert(input);
+    const { data, error } = await supabase.from("event_receipts").insert(row).select().single();
+    if (error) dbErr("event_receipts insert", error);
+
+    if (row.type === "first_buy_completed" || row.type === "buy_completed") {
+      const token = String(row.token || "").toUpperCase();
+      await supabase
+        .from("launches")
+        .update({ buyers: supabase.rpc ? undefined : undefined, updated_at: new Date().toISOString() })
+        .eq("sym", token)
+        .catch(() => {});
+      await supabase.rpc("increment_buyers", { p_sym: token }).catch(() => {});
+    }
+
+    return eventFromRow(data);
+  }
+
+  return updateFileRegistry((registry) => {
+    const type = String(input.type || input.eventType || "").trim();
+    if (!type) {
+      const error = new Error("Event requires `type`.");
+      error.status = 400;
+      throw error;
+    }
+    const event = {
+      id: input.id || `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type, token: input.token || input.launch || null, wallet: input.wallet || null,
+      payload: input.payload || {}, torqueRequest: input.torqueRequest || null,
+      torqueReceipt: input.torqueReceipt || null, torqueError: input.torqueError || null,
+      status: input.status || "recorded", createdAt: new Date().toISOString(),
+    };
     registry.eventReceipts = registry.eventReceipts || [];
     registry.eventReceipts.unshift(event);
-    registry.liveEvents = [liveEventFromReceipt(event), ...(registry.liveEvents || [])].slice(0, 20);
-
+    registry.liveEvents = [liveEventFromEvent(event), ...(registry.liveEvents || [])].slice(0, 20);
     if (event.type === "first_buy_completed" || event.type === "buy_completed") {
       const token = String(event.token || "").toUpperCase();
       const launch = (registry.launches || []).find((item) => item.sym === token);
-
       if (launch) {
         launch.buyers = Number(launch.buyers || 0) + 1;
         launch.updatedAt = new Date().toISOString();
       }
     }
-
     return event;
   });
 }
 
 export async function hasBuyEventForWallet({ token, wallet }) {
-  const registry = await readRegistry();
   const normalizedToken = String(token || "").toUpperCase();
   const normalizedWallet = String(wallet || "");
 
-  return (registry.eventReceipts || []).some((event) => {
-    if (event.type !== "first_buy_completed" && event.type !== "buy_completed") {
-      return false;
-    }
+  if (supabase) {
+    const { data } = await supabase
+      .from("event_receipts")
+      .select("id")
+      .in("type", ["first_buy_completed", "buy_completed"])
+      .eq("token", normalizedToken)
+      .eq("wallet", normalizedWallet)
+      .limit(1)
+      .maybeSingle();
+    return Boolean(data);
+  }
 
+  const registry = await readFileRegistry();
+  return (registry.eventReceipts || []).some((event) => {
+    if (event.type !== "first_buy_completed" && event.type !== "buy_completed") return false;
     return String(event.token || "").toUpperCase() === normalizedToken && String(event.wallet || "") === normalizedWallet;
   });
 }
 
 export async function getCampaignResults(id) {
-  const registry = await readRegistry();
   const campaignId = Number(id);
-  const campaign = registry.campaigns.find((item) => Number(item.id) === campaignId);
 
+  if (supabase) {
+    const { data: campaign, error } = await supabase.from("campaigns").select("*").eq("id", campaignId).maybeSingle();
+    if (error) dbErr("campaigns select", error);
+    if (!campaign) {
+      const err = new Error(`Campaign ${id} was not found.`);
+      err.status = 404;
+      throw err;
+    }
+    const { data: result } = await supabase.from("campaign_results").select("*").eq("campaign_id", campaignId).maybeSingle();
+    return {
+      campaignId,
+      source: result ? "supabase" : "stub",
+      campaign: campaignFromRow(campaign),
+      leaderboard: result?.leaderboard || [],
+      claimStatus: result?.claim_status || "pending_torque_integration",
+      updatedAt: result?.updated_at || null,
+    };
+  }
+
+  const registry = await readFileRegistry();
+  const campaign = registry.campaigns.find((item) => Number(item.id) === campaignId);
   if (!campaign) {
     const error = new Error(`Campaign ${id} was not found.`);
     error.status = 404;
     throw error;
   }
-
   const result = (registry.campaignResults || []).find((item) => Number(item.campaignId) === campaignId);
-
   return {
     campaignId,
     source: result ? "file" : "stub",
