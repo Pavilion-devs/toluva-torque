@@ -63,8 +63,9 @@ function LeaderboardRow({ rank, wallet, metricValue, rewardAmount, isYou }) {
 
 function ClaimCard({ wallet, claimDetails, onClaim, claiming, claimResult }) {
   const eligible = claimDetails.find((offer) => offer.isEligible);
-  const claimTx = claimResult?.cranks?.[0]?.signature || eligible?.cranks?.find((c) => c.status === "DONE")?.signature;
-  const alreadyClaimed = eligible?.cranks?.some((c) => c.status === "DONE");
+  const doneCrank = claimResult?.crank || eligible?.cranks?.find((c) => c.status === "DONE");
+  const claimTx = doneCrank?.signature;
+  const alreadyClaimed = Boolean(doneCrank);
   const claimed = claimResult?.status === "SUCCESS" || alreadyClaimed;
 
   if (!wallet.connected) {

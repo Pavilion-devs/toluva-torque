@@ -39,6 +39,16 @@ const menuLinks = [
     ),
   },
   {
+    href: "/incentives",
+    label: "Incentives",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <circle cx={12} cy={12} r={3} stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    ),
+  },
+  {
     href: "/analytics",
     label: "Analytics",
     icon: (
@@ -54,16 +64,6 @@ const menuLinks = [
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M4 5h16M4 12h16M4 19h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         <path d="M18 16v5l3-2.5L18 16Z" fill="currentColor" />
-      </svg>
-    ),
-  },
-  {
-    href: "/incentives",
-    label: "Incentives",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <circle cx={12} cy={12} r={3} stroke="currentColor" strokeWidth="1.8" />
       </svg>
     ),
   },

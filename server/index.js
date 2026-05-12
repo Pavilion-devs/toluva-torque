@@ -335,7 +335,37 @@ const server = http.createServer(async (req, res) => {
       const upstream = await fetch(
         `${serverBaseUrl}/claim?projectId=${projectId}&wallet=${encodeURIComponent(wallet)}`
       );
-      sendJson(res, upstream.status, await upstream.json().catch(() => ({})));
+      const result = await upstream.json().catch(() => ({}));
+
+      if (result.status === "SUCCESS") {
+        const detailsRes = await fetch(
+          `${serverBaseUrl}/claim/details/byOffer?projectId=${projectId}&offerStatus=ACTIVE&wallet=${encodeURIComponent(wallet)}`
+        ).catch(() => null);
+        const details = await detailsRes?.json().catch(() => null);
+        const offer = details?.data?.[0];
+        const crank = offer?.cranks?.find((c) => c.status === "DONE");
+        const rewardAmount = crank?.amount ?? offer?.eligibleAmounts?.[0]?.amount ?? 0;
+
+        await recordEvent({
+          type: "reward_claimed",
+          token: body.token || null,
+          wallet,
+          launchId: body.launchId || null,
+          campaignId: body.campaignId || offer?.id || null,
+          payload: {
+            campaign_id: offer?.id || null,
+            reward_amount: rewardAmount,
+            txSignature: crank?.signature || null,
+          },
+          torqueReceipt: crank ? { status: "ACCEPTED", crankId: crank.id, signature: crank.signature } : null,
+          status: "emitted",
+        }).catch(() => {});
+
+        sendJson(res, upstream.status, { ...result, crank: crank || null });
+        return;
+      }
+
+      sendJson(res, upstream.status, result);
       return;
     }
 
