@@ -184,12 +184,21 @@ export default function IncentivesPage() {
         <div className="actions">
           <a
             className="btn ghost"
-            href="https://platform.torque.so/docs/mcp/tools/incentives"
+            href="https://solscan.io/tx/4pKH581LXxHPt6uyTfkzAHaP12a8jBd3psQkkJC9Z4JjwXcvQteyM1KKu4E7isRxgMPfazxoCBPdGNzMshmYgwNX"
             target="_blank"
             rel="noreferrer"
             style={{ textDecoration: "none" }}
           >
-            Torque docs
+            Claim tx ↗
+          </a>
+          <a
+            className="btn primary"
+            href="https://platform.torque.so/project/cmp03b5ml0274k01h12kf07dc/incentives/cmp03y0i2029sk01hm3br7vld"
+            target="_blank"
+            rel="noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            View on Torque
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M7 17 17 7M8 7h9v9" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
