@@ -39,14 +39,24 @@ This records the first Toluva-owned Meteora DBC pilot launched through the ordin
 
 ![Toluva token page showing the confirmed DBC buy and updated progress](meteora-devnet-trade.png)
 
+## Confirmed graduation buy
+
+- The normal trade UI reviewed a `1.009101011` SOL buy. Its unsigned transaction simulated without error, with a predicted post-trade DBC quote reserve of exactly `1,000,000,000` lamports. The reviewed quote is captured in [graduation-quote-review.png](graduation-quote-review.png).
+- The connected wallet signed the [graduation buy transaction](https://explorer.solana.com/tx/2iz64DoQaUkCTRcGKrsgs7Wkgw2NfQYQdjfAPfNPynfZ9zfVQDNr47qntLju9597C2hRW6aZx2ba47TvuAMRcWAs?cluster=devnet): `2iz64DoQaUkCTRcGKrsgs7Wkgw2NfQYQdjfAPfNPynfZ9zfVQDNr47qntLju9597C2hRW6aZx2ba47TvuAMRcWAs`. It finalized at slot `508902782` without an error.
+- A fresh chain read showed the 1 SOL threshold reached, `100.00%` progress and migration progress `2` (`LockedVesting`). DBC trading closed while DAMM v2 migration was pending. These are observed post-transaction states, not simulation claims.
+
+## Confirmed DAMM v2 migration
+
+- The wallet-signed [migration transaction](https://explorer.solana.com/tx/3CCd61o97tHar7LJV8A8pCxYceR9H3GA6JGjruC3kNx9tw6QSUcqAjUnL6c6uS9WkYJ1bxmkibUJSW3Y6WXBGqXA?cluster=devnet): `3CCd61o97tHar7LJV8A8pCxYceR9H3GA6JGjruC3kNx9tw6QSUcqAjUnL6c6uS9WkYJ1bxmkibUJSW3Y6WXBGqXA` finalized at slot `508927655` without an error.
+- The derived [DAMM v2 pool](https://explorer.solana.com/address/3PUTDKRphNrbXw8MtVa1HvFBGek2fS6NEDM1tyZogbsj?cluster=devnet) `3PUTDKRphNrbXw8MtVa1HvFBGek2fS6NEDM1tyZogbsj` exists on devnet under the DAMM v2 program. Toluva's chain reader verifies it is enabled and reads the configured `0.3%` initial base fee.
+- The chain reader found [position](https://explorer.solana.com/address/EdLgChkFkJoCQNVMdmxTMG6M6o5kcAd1KQwzxjRNrPHo?cluster=devnet) `EdLgChkFkJoCQNVMdmxTMG6M6o5kcAd1KQwzxjRNrPHo`, whose [NFT](https://explorer.solana.com/address/HoqnASbSjhXEfW6v8U5KT6RdSZ8471UR2qmXY4CuucSR?cluster=devnet) is held by creator wallet `Dc12XGCWDcnxpjDsYuz89vFqYJ4YHxYb3dvGFBC22MdL`. The position reports `4116568165138960358144621872092` unlocked liquidity units and `4116568165138960358144621872091` permanently locked units, matching the recipe's 50/50 split to integer rounding. These are DAMM liquidity units, not token or SOL amounts.
+- Before the user signed, the migration transaction was built for this pool and simulated on devnet without an error (`144,370` compute units). The migration UI now displays the verified successor pool, position owner, lock state and confirmed transaction through the ordinary token page.
+
+![Toluva token page showing the verified DAMM v2 pool and creator position](meteora-devnet-migration.jpg)
+
 ## Next evidence
 
-- Wallet-signed DBC sell: pending.
-- DAMM v2 migration and position state: pending.
-- Verified campaign and reward evidence: pending.
-
-The lifecycle reader currently reports this pilot as `bonding`, with `990,000` quote-reserve lamports against the `1,000,000,000` lamport graduation target. It derives prospective DAMM v2 pool `3PUTDKRphNrbXw8MtVa1HvFBGek2fS6NEDM1tyZogbsj` from the on-chain DBC config, mint and Meteora's fee-option mapping. That address has not been created yet. The migration build endpoint correctly rejects this pool as ineligible. A separate SDK build, never signed or submitted, produced a 1,139-byte migration transaction with the expected DBC instruction, DAMM v2 pool/config accounts and two position NFT signers. This confirms transaction construction and account mapping only; the migration and post-migration reader still need a live end-to-end proof.
-
-The normal trade UI reviewed a `1.009101011` SOL graduation buy. Its unsigned transaction simulated without error against the current devnet state. The simulated post-transaction DBC account had exactly `1,000,000,000` quote-reserve lamports, migration progress `2` (`LockedVesting`) and `isMigrated = 0`. This is a predicted post-state, not an executed buy. The reviewed quote screenshot is [graduation-quote-review.png](graduation-quote-review.png).
+- Wallet-signed DBC sell on a still-active curve: pending. This graduated pool has closed DBC trading, so that check requires another ordinary launch or an independent active pool.
+- Independent creator reproduction, general-purpose metadata hosting, verified campaign eligibility and funded reward claim: pending.
 
 The first pool build attempt exposed a schema mapping error: the SDK builder accepts nested `migratedPoolFee`, while decoded on-chain `PoolConfig` stores `migratedPoolFeeBps` at the top level. The confirmed config was unaffected. The reader now uses the on-chain field, and an unsigned pool transaction using this config passed devnet simulation before the successful wallet-signed launch.

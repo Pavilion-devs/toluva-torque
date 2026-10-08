@@ -10,8 +10,8 @@ This repository began as Toluva's Raydium LaunchLab + Torque hackathon project. 
 - The API builds unsigned config and pool transactions. The browser generates the extra signers, and the connected wallet signs both transactions.
 - Pool registration checks a confirmed DBC pool, its derived address, creator and mint signatures, and the specific pool creation instruction. Name, symbol and URI are decoded from that instruction.
 - The public launch page reads live DBC progress and on-chain config terms. The creator can resume after a confirmed config or retry registration after a confirmed pool.
-- Exact-input DBC quote and buy/sell transaction builders are wired to a wallet-signed trade card with slippage and minimum-received review. A wallet-signed 0.001 SOL buy succeeded on the new devnet pool; a sell has not yet been signed.
-- A creator-signed devnet DBC config, wallet-signed token pool and first buy are [confirmed on chain](docs/meteora-proof.md). The live page reads the resulting 0.10% curve progress. Sell execution, migration, general-purpose metadata hosting, verified campaigns and rewards are still in the [plan](plan.md). New DBC launch pages do not present those as live features.
+- Exact-input DBC quote and buy/sell transaction builders are wired to a wallet-signed trade card with slippage and minimum-received review. Two wallet-signed buys completed the first pilot curve; a sell has not yet been signed.
+- The creator-signed config, token pool, buys and DAMM v2 migration are [confirmed on chain](docs/meteora-proof.md). The live page reads the graduated pool, creator position NFT, fee and permanent liquidity lock. General-purpose metadata hosting, independent creator reproduction, verified campaigns and rewards remain in the [plan](plan.md).
 
 ## Run locally
 
@@ -32,7 +32,7 @@ Creators need a Solana browser wallet, devnet SOL for account rent and fees, and
 
 1. Submit and inspect a wallet-signed DBC sell through the normal token page.
 2. Add general-purpose metadata hosting so creators do not need to supply their own URI.
-3. Track graduation into DAMM v2 and read migrated positions and locks.
+3. Reproduce a launch with an independent creator wallet.
 4. Verify participation from confirmed transactions before enabling campaign rewards.
 
 See [plan.md](plan.md) for exit criteria and evidence standards.
