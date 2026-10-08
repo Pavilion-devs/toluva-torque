@@ -1,4 +1,4 @@
-export const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787";
+export const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : null);
 
 export function requireApiBaseUrl() {
   if (!apiBaseUrl) {
@@ -12,7 +12,9 @@ export async function getJson(path) {
   const response = await fetch(`${requireApiBaseUrl()}${path}`, {
     headers: { Accept: "application/json" },
   });
-  return response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `${path} returned ${response.status}.`);
+  return payload;
 }
 
 export async function fetchLeaderboard() {

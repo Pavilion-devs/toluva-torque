@@ -1,10 +1,10 @@
 import React from "react";
 
 const stack = [
-  { label: "Raydium LaunchLab", icon: "solar:waterdrop-bold" },
-  { label: "Torque", icon: "solar:bolt-bold" },
+  { label: "Meteora DBC", icon: "solar:waterdrop-bold" },
+  { label: "DAMM v2", icon: "solar:bolt-bold" },
   { label: "Solana", icon: "solar:sun-bold" },
-  { label: "Anchor", icon: "solar:anchor-bold" },
+  { label: "On-chain terms", icon: "solar:anchor-bold" },
   { label: "Vite", icon: "solar:bolt-circle-bold" },
   { label: "React", icon: "solar:atom-bold" },
 ];

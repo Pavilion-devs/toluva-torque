@@ -2,8 +2,8 @@ import React from "react";
 
 const navLinks = [
   { label: "How it works", href: "#how-it-works" },
-  { label: "Templates", href: "#templates" },
-  { label: "Docs", href: "#docs" },
+  { label: "Launches", href: "/launches" },
+  { label: "Docs", href: "https://docs.meteora.ag/core-products/dbc/what-is-dbc" },
 ];
 
 function BrandMark() {
@@ -49,7 +49,7 @@ function NavActions() {
   return (
     <div className="flex items-center gap-4 text-sm font-normal" data-aura-component-name="Navbar">
       <a
-        href="/dashboard"
+        href="/launches"
         className="flex min-h-10 items-center gap-2 rounded-full bg-pink-500 px-5 py-2.5 text-white transition-all duration-300 hover:bg-pink-600 hover:shadow-lg hover:shadow-pink-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2"
         data-aura-component-name="Navbar"
       >

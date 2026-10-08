@@ -3,7 +3,7 @@ import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
-import { postJson } from "../../../lib/toluvaApi";
+import { getJson, postJson } from "../../../lib/toluvaApi";
 
 const BUY_PRESETS_SOL  = ["0.01", "0.05", "0.1", "0.5"];
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -484,6 +484,156 @@ function StatTile({ label, value, sub }) {
   );
 }
 
+function MeteoraTradeCard({ launch }) {
+  const wallet = useWallet();
+  const [direction, setDirection] = React.useState("buy");
+  const [amount, setAmount] = React.useState("");
+  const [slippageBps, setSlippageBps] = React.useState(100);
+  const [quote, setQuote] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [signature, setSignature] = React.useState(null);
+  const canTrade = launch.dbc.liveStatus?.migrationProgress === 0;
+
+  React.useEffect(() => { setQuote(null); }, [direction, amount, slippageBps, launch.dbc.pool]);
+
+  async function review() {
+    setBusy(true); setError(null);
+    try {
+      const params = new URLSearchParams({ pool: launch.dbc.pool, direction, amount, slippageBps: String(slippageBps) });
+      const result = await getJson(`/api/meteora/swap/quote?${params}`);
+      setQuote(result.quote);
+    } catch (cause) {
+      setError(cause.message || "Unable to quote this trade.");
+    } finally { setBusy(false); }
+  }
+
+  async function trade() {
+    if (!quote) return;
+    setBusy(true); setError(null);
+    try {
+      const { tradeMeteoraToken } = await import("../../../lib/meteoraDbc");
+      const result = await tradeMeteoraToken({ wallet, reviewedQuote: quote });
+      setSignature(result.signature);
+      setQuote(null);
+      setAmount("");
+      await refreshRegistry({ force: true });
+    } catch (cause) {
+      setError(cause.message || "Trade failed.");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Trade on Meteora DBC</h3>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Devnet · exact input · wallet-signed</div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {["buy", "sell"].map((mode) => <button key={mode} type="button" className={`btn ${direction === mode ? "primary" : "ghost"}`} onClick={() => setDirection(mode)}>{mode === "buy" ? `Buy ${launch.dbc.symbol}` : `Sell ${launch.dbc.symbol}`}</button>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 150px", gap: 12 }}>
+        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Amount ({direction === "buy" ? "SOL" : launch.dbc.symbol})
+          <input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={direction === "buy" ? "0.01" : "100"} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
+        </label>
+        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Slippage
+          <select value={slippageBps} onChange={(event) => setSlippageBps(Number(event.target.value))} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
+            <option value={50}>0.5%</option><option value={100}>1%</option><option value={200}>2%</option><option value={500}>5%</option>
+          </select>
+        </label>
+      </div>
+      {!canTrade && <div style={{ fontSize: 12, color: "var(--muted)" }}>{launch.dbc.liveStatus ? "The DBC curve has finished; trading here is closed." : "Waiting for live pool state before trading."}</div>}
+      {quote && <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 12, lineHeight: 1.7 }}>
+        <div>Estimated received: <strong>{quote.outputAmountDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+        <div>Minimum received: <strong>{quote.minimumAmountOutDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+        <div style={{ color: "var(--muted)" }}>The transaction will fail if the minimum cannot be met. Network and token account costs may also apply.</div>
+      </div>}
+      {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {wallet.error && <div style={{ color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
+      {signature && <a href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed trade {shortAddress(signature)} ↗</a>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <button type="button" className="btn ghost" disabled={busy || !canTrade || !amount} onClick={review}>{busy && !quote ? "Quoting…" : "Review quote"}</button>
+        {quote && <button type="button" className="btn primary" disabled={busy || !wallet.connected || !canTrade} onClick={trade}>{busy ? "Signing…" : "Sign trade"}</button>}
+        {!wallet.connected && <button type="button" className="btn ghost" onClick={wallet.connect}>Connect wallet</button>}
+      </div>
+    </div>
+  );
+}
+
+function MeteoraTokenDetailPage({ launch }) {
+  const dbc = launch.dbc;
+  const chain = dbc.liveStatus;
+  const terms = dbc.onchainConfig || {};
+  const progress = chain?.progressPercent;
+  const targetSol = terms.migrationQuoteThreshold ? Number(terms.migrationQuoteThreshold) / LAMPORTS_PER_SOL : null;
+  const status = chain
+    ? chain.migrationProgress === 3 ? "Migrated to DAMM v2" : progress >= 100 ? "Curve complete · migration pending" : "Trading on DBC"
+    : "Waiting for chain status";
+  const explorer = (kind, value) => `https://explorer.solana.com/${kind}/${value}?cluster=${encodeURIComponent(dbc.cluster || "devnet")}`;
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <Link href="/launches" style={{ fontSize: 12, color: "var(--muted)" }}>← All launches</Link>
+          <h1 style={{ marginTop: 10 }}>{launch.name}</h1>
+          <div className="sub">${dbc.symbol} · Meteora DBC · {dbc.cluster}</div>
+        </div>
+        <div className="actions"><span className={`status-pill ${chain?.migrationProgress === 3 ? "completed" : "progress"}`}>{status}</span></div>
+      </div>
+
+      {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239" }}>Live pool state is unavailable: {dbc.liveError}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
+        <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <TokenIcon symbol={dbc.symbol} size={72} imageUrl={launch.image} rounded={16} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{launch.name}</div>
+              <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>{launch.description || "Public Meteora DBC launch"}</div>
+            </div>
+          </div>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
+              <strong>Graduation progress</strong><span>{Number.isFinite(progress) ? `${progress.toFixed(2)}%` : "—"}</span>
+            </div>
+            <div style={{ height: 10, background: "var(--card-muted)", borderRadius: 999, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, progress || 0))}%`, background: "linear-gradient(90deg,#fb7185,#ec4899)" }} />
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>Target: {targetSol === null ? "—" : `${targetSol} SOL`} · Destination: DAMM v2</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+            <StatTile label="DBC fee" value={terms.curveFeeBps === undefined ? "—" : `${terms.curveFeeBps / 100}%`} />
+            <StatTile label="DAMM v2 fee" value={terms.migratedPoolFeeBps === undefined ? "—" : `${terms.migratedPoolFeeBps / 100}%`} />
+            <StatTile label="Permanent lock" value={`${terms.creatorPermanentLockedLiquidityPercentage ?? 0}%`} sub="Creator liquidity" />
+            <StatTile label="Creator liquidity" value={`${terms.creatorLiquidityPercentage ?? 0}%`} sub="Unlocked at migration" />
+          </div>
+        </div>
+        <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+          <h3 style={{ margin: 0 }}>On-chain launch record</h3>
+          {[
+            ["Token mint", dbc.mint, "address"],
+            ["DBC pool", dbc.pool, "address"],
+            ["Config", dbc.config, "address"],
+            ["Creator", launch.creator, "address"],
+            ["Fee claimer", terms.feeClaimer, "address"],
+            ["Leftover receiver", terms.leftoverReceiver, "address"],
+            ["Launch transaction", dbc.signature, "tx"],
+          ].map(([label, address, kind]) => address && (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
+              <span style={{ color: "var(--muted)" }}>{label}</span>
+              <a href={explorer(kind, address)} target="_blank" rel="noreferrer" style={{ fontFamily: "'Geist Mono', monospace", color: "var(--green)" }}>{shortAddress(address)} ↗</a>
+            </div>
+          ))}
+          {dbc.uri && <a href={dbc.uri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--green)" }}>Token metadata ↗</a>}
+          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Progress and terms are read from the selected devnet pool and config. The launch transaction is independently inspectable.</div>
+        </div>
+        <MeteoraTradeCard launch={launch} />
+      </div>
+    </div>
+  );
+}
+
 export default function TokenDetailPage({ sym }) {
   const { registry } = useRegistry();
   const wallet = useWallet();
@@ -511,6 +661,8 @@ export default function TokenDetailPage({ sym }) {
       </div>
     );
   }
+
+  if (launch.dbc) return <MeteoraTokenDetailPage launch={launch} />;
 
   const events = (registry.eventReceipts || []).filter((ev) => String(ev.token || "").toUpperCase() === sym).slice(0, 12);
   const buyEvents = events.filter((ev) => ev.type === "buy_completed" || ev.type === "first_buy_completed");

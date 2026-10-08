@@ -17,6 +17,17 @@ import {
   prepareLaunchTransactionPlan,
 } from "./services/raydium-launchlab.js";
 import { getSolanaStatus } from "./services/solana.js";
+import {
+  buildConfigTransaction,
+  buildPoolTransaction,
+  buildSwapTransaction,
+  convictionTerms,
+  getConfigTerms,
+  getPoolStatus,
+  quoteDbcSwap,
+  summarizeConfig,
+  verifyPoolLaunch,
+} from "./services/meteora-dbc.js";
 import { torqueEventSchemas } from "./services/torque-event-catalog.js";
 import { emitTorqueEvent } from "./services/torque-client.js";
 
@@ -41,8 +52,15 @@ function sendError(res, error) {
 
 async function readBody(req) {
   const chunks = [];
+  let bytes = 0;
 
   for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > 64 * 1024) {
+      const error = new Error("Request body must be smaller than 64 KB.");
+      error.status = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
 
@@ -80,7 +98,7 @@ function bondingProgressFromPool(pool) {
   return Number((realB * 100000n) / totalFundRaisingB) / 1000;
 }
 
-async function registryWithLiveRaydiumState() {
+async function registryWithLivePoolState() {
   const registry = await readRegistry();
   const launches = registry.launches || [];
 
@@ -88,7 +106,20 @@ async function registryWithLiveRaydiumState() {
     launches.map(async (launch) => {
       const poolId = launch.raydium?.poolId;
 
-      if (!poolId) {
+      if (launch.dbc?.pool) {
+        try {
+          const status = await getPoolStatus(launch.dbc.pool);
+          launch.dbc = { ...launch.dbc, liveStatus: status, liveCheckedAt: new Date().toISOString(), liveError: null };
+          launch.bonded = status.progressPercent;
+          launch.migrationState = status.migrationProgress === 3 ? "migrated" : status.progressPercent >= 100 ? "migrating" : "bonding";
+          launch.status = launch.migrationState;
+        } catch (error) {
+          launch.dbc = { ...launch.dbc, liveError: error.message || "Unable to read DBC pool.", liveCheckedAt: new Date().toISOString() };
+        }
+        return;
+      }
+
+      if (!poolId || !config.legacyEnabled) {
         return;
       }
 
@@ -133,6 +164,17 @@ const server = http.createServer(async (req, res) => {
   const pathname = routePath(req);
 
   try {
+    const legacyWrite = req.method === "POST" && (
+      pathname === "/api/launches"
+      || pathname === "/api/campaigns"
+      || pathname === "/api/events"
+      || /^\/api\/launches\/[^/]+\/buy-events$/.test(pathname)
+    );
+    if (!config.legacyEnabled && (legacyWrite || pathname.startsWith("/api/raydium/") || pathname.startsWith("/api/torque/"))) {
+      sendJson(res, 410, { error: "This prior-project endpoint is disabled in the Meteora product." });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/health") {
       sendJson(res, 200, { ok: true, service: "toluva-api" });
       return;
@@ -153,7 +195,88 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/registry") {
-      sendJson(res, 200, await registryWithLiveRaydiumState());
+      sendJson(res, 200, await registryWithLivePoolState());
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/terms") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { terms: convictionTerms({ migrationThresholdSol: url.searchParams.get("migrationThresholdSol") || undefined }) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/config") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const { address, state } = await getConfigTerms(url.searchParams.get("address"));
+      sendJson(res, 200, { config: summarizeConfig(address, state) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/pool") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { pool: await getPoolStatus(url.searchParams.get("address")) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/swap/quote") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { quote: await quoteDbcSwap(Object.fromEntries(url.searchParams)) });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/swap/build") {
+      sendJson(res, 200, await buildSwapTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/config/build") {
+      sendJson(res, 200, await buildConfigTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/pool/build") {
+      sendJson(res, 200, await buildPoolTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/launches") {
+      const body = await readBody(req);
+      const verified = await verifyPoolLaunch(body);
+      const existing = (await readRegistry()).launches.find((item) => item.dbc?.mint === verified.mint && item.dbc?.cluster === config.solana.cluster);
+      if (existing) {
+        sendJson(res, 200, { launch: existing, alreadyRegistered: true });
+        return;
+      }
+      const symbol = String(verified.metadata.symbol).trim().toUpperCase();
+      const name = String(verified.metadata.name).trim();
+      if (!/^[A-Z0-9]{2,10}$/.test(symbol) || !name || name.length > 32) {
+        const error = new Error("A 2–10 character symbol and token name are required.");
+        error.status = 400;
+        throw error;
+      }
+      const launch = await createLaunch({
+        sym: `${symbol}-${verified.mint}`.toUpperCase(),
+        name,
+        description: "",
+        image: null,
+        status: "bonding",
+        pool: verified.pool,
+        age: "now",
+        migrationTime: "Pending",
+        migrationState: "bonding",
+        creator: String(body.creator),
+        dbc: {
+          cluster: config.solana.cluster,
+          symbol,
+          mint: verified.mint,
+          pool: verified.pool,
+          config: verified.config,
+          signature: String(body.signature),
+          uri: verified.metadata.uri,
+          onchainConfig: summarizeConfig(verified.config, verified.configState),
+        },
+      });
+      sendJson(res, 201, { launch });
       return;
     }
 

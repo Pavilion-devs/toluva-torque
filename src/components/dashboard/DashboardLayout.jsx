@@ -92,7 +92,7 @@ const generalLinks = [
   },
   {
     href: "/",
-    label: "Logout",
+    label: "Home",
     icon: (
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M15 17l5-5-5-5M20 12H9M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -124,7 +124,7 @@ export default function DashboardLayout({ pathname, children }) {
   const buyEventCount = (registry.eventReceipts || []).filter(
     (event) => event.type === "first_buy_completed" || event.type === "buy_completed",
   ).length;
-  const links = menuLinks.map((link) => {
+  const links = menuLinks.filter((link) => link.href === "/dashboard" || link.href === "/launches").map((link) => {
     if (link.href === "/launches") {
       return { ...link, badge: String((registry.launches || []).length) };
     }
@@ -159,7 +159,7 @@ export default function DashboardLayout({ pathname, children }) {
         </div>
         <nav className="sb-nav">
           {generalLinks.map((link) => (
-            <NavLink key={link.label} {...link} active={pathname === link.href && link.label !== "Logout"} />
+            <NavLink key={link.label} {...link} active={pathname === link.href && link.label !== "Home"} />
           ))}
         </nav>
         <div className="sb-spacer" />
@@ -170,11 +170,11 @@ export default function DashboardLayout({ pathname, children }) {
             </svg>
           </div>
           <div className="promo-title">
-            Powered by <b>Torque</b>
+            Built on <b>Meteora DBC</b>
           </div>
-          <div className="promo-sub">Attach growth at launch</div>
-          <Link href="/incentives" className="promo-btn" style={{ display: "block", textAlign: "center" }}>
-            New campaign
+          <div className="promo-sub">Launch terms, on chain</div>
+          <Link href="/launches" className="promo-btn" style={{ display: "block", textAlign: "center" }}>
+            Explore launches
           </Link>
         </div>
       </aside>
@@ -186,8 +186,7 @@ export default function DashboardLayout({ pathname, children }) {
               <circle cx={11} cy={11} r={7} stroke="currentColor" strokeWidth="1.8" />
               <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
-            <input type="text" placeholder="Search launches, campaigns, claims…" />
-            <span className="kbd">⌘ F</span>
+            <span style={{ color: "var(--muted)", fontSize: 12 }}>Solana devnet · Meteora DBC</span>
           </div>
           <div className="tb-right">
             {wallet.connected ? (
@@ -195,12 +194,13 @@ export default function DashboardLayout({ pathname, children }) {
                 type="button"
                 className="wallet-chip"
                 onClick={() => wallet.disconnect()}
-                aria-label="Wallet menu"
+                aria-label="Disconnect wallet"
+                title="Disconnect wallet"
               >
                 <span className="wavatar" />
                 <span className="waddr">{wallet.short}</span>
                 <svg className="wcaret" viewBox="0 0 24 24" fill="none">
-                  <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                 </svg>
               </button>
             ) : (
@@ -219,6 +219,7 @@ export default function DashboardLayout({ pathname, children }) {
             )}
           </div>
         </header>
+        {wallet.error && <div style={{ margin: "12px 24px", padding: "10px 14px", borderRadius: 10, background: "#fff1f2", color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
         {children}
       </div>
     </div>

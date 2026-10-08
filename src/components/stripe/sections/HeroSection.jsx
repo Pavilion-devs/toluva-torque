@@ -1,31 +1,28 @@
 import React from "react";
 
-const titleWords = ["Launch", "tokens", "with", "growth", "campaigns", "attached."];
+const titleWords = ["Launch", "tokens", "with", "terms", "people", "can", "verify."];
 
 const descriptionWords = [
   "Toluva",
   "is",
-  "an",
-  "incentive-native",
+  "a",
+  "self-service",
+  "Meteora",
+  "DBC",
   "launchpad.",
-  "Spin",
-  "up",
-  "a",
-  "token,",
-  "attach",
-  "a",
-  "Torque",
-  "campaign,",
+  "Choose",
+  "your",
+  "graduation",
+  "target,",
+  "sign",
+  "with",
+  "your",
+  "wallet,",
   "and",
-  "ship",
+  "publish",
   "the",
-  "first",
-  "buyer",
-  "rewards",
-  "in",
-  "the",
-  "same",
-  "flow.",
+  "on-chain",
+  "record.",
 ];
 
 function RevealText({ as: Component, words, className, startDelay }) {
@@ -153,11 +150,11 @@ function PlatformMetricBadge() {
     >
       <span>Powered by</span>
       <span className="font-medium tracking-tight text-slate-900" data-aura-component-name="Hero">
-        Raydium LaunchLab
+        Meteora DBC
       </span>
       <span className="text-slate-300">·</span>
       <span className="font-medium tracking-tight text-slate-900" data-aura-component-name="Hero">
-        Torque
+        Solana
       </span>
     </div>
   );
@@ -209,7 +206,7 @@ function DashboardPreview() {
           <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
           <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
           <span className="ml-3 text-[11px] font-medium tracking-tight text-slate-400">
-            app.toluva.xyz/dashboard
+            Toluva launch dashboard
           </span>
         </div>
         <iframe

@@ -1,7 +1,7 @@
 import React from "react";
 import fallbackRegistry from "../../data/launch-registry.json";
 
-const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787";
+const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : null);
 const registryRefreshMs = 10_000;
 const lamportsPerSol = 1_000_000_000;
 const listeners = new Set();
@@ -167,7 +167,7 @@ export function getRegistryAnalytics(sourceRegistry = fallbackRegistry) {
   const sourceCampaigns = sourceRegistry.campaigns || [];
   const sourceEvents = sourceRegistry.eventReceipts || [];
   const buyEvents = sourceEvents.filter((event) => event.type === "buy_completed" || event.type === "first_buy_completed");
-  const raydiumLaunches = sourceLaunches.filter((launch) => launch.raydium?.poolId);
+  const meteoraLaunches = sourceLaunches.filter((launch) => launch.dbc?.pool);
   const activeCampaigns = sourceCampaigns.filter((campaign) => campaign.status === "live");
   const emittedTorqueEvents = sourceEvents.filter((event) => event.status === "emitted");
   const volumeByDay = buyEvents.reduce((days, event) => {
@@ -183,7 +183,7 @@ export function getRegistryAnalytics(sourceRegistry = fallbackRegistry) {
   return {
     stats: [
       { label: "Real launches", value: String(sourceLaunches.length), unit: "tokens", delta: "API registry", positive: true },
-      { label: "Raydium pools", value: String(raydiumLaunches.length), unit: "devnet", delta: "pool-backed", positive: true },
+      { label: "Meteora pools", value: String(meteoraLaunches.length), unit: "devnet", delta: "pool-backed", positive: true },
       { label: "Torque events", value: String(emittedTorqueEvents.length), unit: "accepted", delta: "ingest receipts", positive: true },
       { label: "Active campaigns", value: String(activeCampaigns.length), unit: "live", delta: "registry records", positive: true },
     ],

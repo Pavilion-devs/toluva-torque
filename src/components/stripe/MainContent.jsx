@@ -3,7 +3,6 @@ import CursorFollower from "./sections/CursorFollower";
 import HeroSection from "./sections/HeroSection";
 import LogoStrip from "./sections/LogoStrip";
 import HowItWorksSection from "./sections/HowItWorksSection";
-import IncentiveTemplatesSection from "./sections/IncentiveTemplatesSection";
 
 export default function MainContent() {
   return (
@@ -12,7 +11,6 @@ export default function MainContent() {
       <HeroSection />
       <LogoStrip />
       <HowItWorksSection />
-      <IncentiveTemplatesSection />
     </main>
   );
 }

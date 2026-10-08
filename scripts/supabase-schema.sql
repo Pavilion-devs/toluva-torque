@@ -17,11 +17,14 @@ create table if not exists launches (
   migration_time  text not null default 'Draft',
   migration_state text not null default 'draft',
   raydium         jsonb,
+  dbc             jsonb,
   torque          jsonb,
   creator         text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+
+alter table launches add column if not exists dbc jsonb;
 
 -- ─── Campaigns ───────────────────────────────────────────────────────────────
 

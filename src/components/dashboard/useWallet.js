@@ -8,7 +8,7 @@ import {
 
 let walletState = {
   address: null,
-  walletName: "Demo wallet",
+  walletName: "Solana wallet",
   source: "none",
   connecting: false,
   error: null,
@@ -66,7 +66,7 @@ export default function useWallet() {
       .finally(() => {
         setWalletState({
           address: null,
-          walletName: "Demo wallet",
+          walletName: "Solana wallet",
           source: "none",
           connecting: false,
           error: null,

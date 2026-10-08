@@ -43,6 +43,7 @@ function numberFromEnv(value, fallback) {
 
 export const config = {
   projectRoot,
+  legacyEnabled: process.env.TOLUVA_LEGACY_API_ENABLED === "true",
   api: {
     port: numberFromEnv(process.env.PORT || process.env.TOLUVA_API_PORT, 8787),
     allowedOrigin: process.env.TOLUVA_ALLOWED_ORIGIN || "*",

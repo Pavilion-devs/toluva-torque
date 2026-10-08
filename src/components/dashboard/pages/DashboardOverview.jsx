@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "../Link";
 import { TokenIcon } from "../tokenIcons";
-import { getRegistryAnalytics, useRegistry } from "../../../lib/launchRegistry";
+import { useRegistry } from "../../../lib/launchRegistry";
 
 const lamportsPerSol = 1_000_000_000;
 
@@ -101,6 +101,7 @@ function formatRelative(value, now) {
 }
 
 function poolProgress(launch) {
+  if (launch?.dbc) return numeric(launch.dbc.liveStatus?.progressPercent);
   const pool = launch?.raydium?.livePool;
   const realB = numeric(pool?.realB);
   const totalFundRaisingB = numeric(pool?.totalFundRaisingB);
@@ -113,11 +114,13 @@ function poolProgress(launch) {
 }
 
 function poolRaisedSol(launch) {
+  if (launch?.dbc) return numeric(launch.dbc.liveStatus?.quoteReserveLamports) / lamportsPerSol;
   const pool = launch?.raydium?.livePool;
   return numeric(pool?.realB) / lamportsPerSol;
 }
 
 function poolTargetSol(launch) {
+  if (launch?.dbc) return numeric(launch.dbc.onchainConfig?.migrationQuoteThreshold) / lamportsPerSol;
   const pool = launch?.raydium?.livePool;
   return numeric(pool?.totalFundRaisingB) / lamportsPerSol;
 }
@@ -168,7 +171,7 @@ function ActivityRow({ event, now }) {
 }
 
 export default function DashboardOverview() {
-  const { registry } = useRegistry();
+  const { registry, error } = useRegistry();
   const [now, setNow] = React.useState(() => new Date());
 
   React.useEffect(() => {
@@ -177,31 +180,30 @@ export default function DashboardOverview() {
   }, []);
 
   const launches = registry.launches || [];
-  const campaigns = registry.campaigns || [];
   const events = registry.eventReceipts || [];
-  const analytics = getRegistryAnalytics(registry);
-  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "live").length;
-  const raydiumLaunches = launches.filter((launch) => launch.raydium?.poolId);
-  const liveRaydiumLaunches = raydiumLaunches.filter((launch) => launch.raydium?.liveStatus === "pool_read");
-  const acceptedEvents = events.filter((event) => torqueStatus(event) === "ACCEPTED");
-  const buyEvents = events.filter((event) => event.type === "buy_completed" || event.type === "first_buy_completed");
+  const meteoraLaunches = launches.filter((launch) => launch.dbc?.pool);
+  const liveMeteoraLaunches = meteoraLaunches.filter((launch) => launch.dbc?.liveStatus);
+  const verifiedDbcEvents = events.filter((event) => event.status === "verified" && event.verification?.source === "solana_rpc" && event.payload?.protocol === "meteora_dbc");
+  const buyEvents = verifiedDbcEvents.filter((event) => event.type === "buy_completed" || event.type === "first_buy_completed");
   const totalBuySol = buyEvents.reduce((total, event) => total + eventAmountSol(event), 0);
-  const migrationLaunch = raydiumLaunches[0] || launches[0] || null;
+  const migrationLaunch = meteoraLaunches[0] || null;
   const migrationProgress = poolProgress(migrationLaunch);
   const visibleMigrationProgress = migrationProgress > 0 ? Math.max(0.8, Math.min(100, migrationProgress)) : 0;
   const raisedSol = poolRaisedSol(migrationLaunch);
   const targetSol = poolTargetSol(migrationLaunch);
-  const firstLaunchAt = launches.reduce((oldest, launch) => {
+  const firstLaunchAt = meteoraLaunches.reduce((oldest, launch) => {
     const createdAt = parseDate(launch.createdAt);
     if (!createdAt) return oldest;
     return !oldest || createdAt < oldest ? createdAt : oldest;
   }, null);
-  const latestEvent = events[0] || null;
+  const latestSync = meteoraLaunches.reduce((latest, launch) => {
+    const checked = parseDate(launch.dbc?.liveCheckedAt);
+    return checked && (!latest || checked > latest) ? checked : latest;
+  }, null);
   const uptimeDisplay = formatUptime(firstLaunchAt ? now.getTime() - firstLaunchAt.getTime() : 0);
-  const latestEventMs = latestEvent ? parseDate(latestEvent.createdAt)?.getTime() : null;
-  const heartbeatAgeSec = latestEventMs ? Math.round((now.getTime() - latestEventMs) / 1000) : null;
+  const heartbeatAgeSec = latestSync ? Math.round((now.getTime() - latestSync.getTime()) / 1000) : null;
   const healthLabel = heartbeatAgeSec === null
-    ? "No pulse"
+    ? "No pool sync"
     : heartbeatAgeSec <= 45
       ? `Online · ${heartbeatAgeSec}s ago`
       : heartbeatAgeSec <= 120
@@ -212,10 +214,14 @@ export default function DashboardOverview() {
     : heartbeatAgeSec <= 45
       ? "rgba(130, 230, 170, 0.95)"
       : "rgba(255, 195, 120, 0.9)";
-  const visibleLaunches = launches.slice(0, 5);
-  const visibleEvents = events.slice(0, 5);
+  const visibleLaunches = meteoraLaunches.slice(0, 5);
+  const visibleEvents = verifiedDbcEvents.slice(0, 5);
   const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
-  const volumeMap = Object.fromEntries(analytics.volumeSeries.map((p) => [p.date, p.value]));
+  const volumeMap = buyEvents.reduce((map, event) => {
+    const date = parseDate(event.createdAt)?.toISOString().slice(0, 10);
+    if (date) map[date] = (map[date] || 0) + eventAmountSol(event);
+    return map;
+  }, {});
   const sevenDayWindow = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now);
     d.setDate(now.getDate() - (6 - i));
@@ -226,10 +232,11 @@ export default function DashboardOverview() {
 
   return (
     <div className="page">
+      {error && <div className="card" style={{ marginBottom: 16, padding: 14, color: "#9f1239" }}>Launch data is unavailable: {error}</div>}
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>
-          <div className="sub">Live local API records only. New test launches will appear here after signing.</div>
+          <div className="sub">Public Meteora DBC launches and their on-chain progress.</div>
         </div>
         <div className="actions">
           <Link href="/launches" className="btn primary">
@@ -238,60 +245,57 @@ export default function DashboardOverview() {
             </svg>
             New launch
           </Link>
-          <Link href="/campaigns" className="btn ghost">
-            Campaigns
-          </Link>
         </div>
       </div>
 
       <div className="grid">
         <div className="card stat dark c-stat-1">
           <div className="stat-head">
-            <div className="stat-title">Total Launches</div>
+            <div className="stat-title">DBC Launches</div>
             <div className="stat-arrow">
               <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
-          <div className="stat-value">{launches.length}</div>
-          <div className="stat-foot">Records written by the local API</div>
+          <div className="stat-value">{meteoraLaunches.length}</div>
+          <div className="stat-foot">Confirmed on-chain pools</div>
         </div>
 
         <div className="card stat c-stat-2">
           <div className="stat-head">
-            <div className="stat-title">Raydium Pools</div>
+            <div className="stat-title">Live Meteora Pools</div>
             <div className="stat-arrow">
               <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
-          <div className="stat-value">{liveRaydiumLaunches.length}</div>
-          <div className="stat-foot">{raydiumLaunches.length} pool-backed launch{raydiumLaunches.length === 1 ? "" : "es"}</div>
+          <div className="stat-value">{liveMeteoraLaunches.length}</div>
+          <div className="stat-foot">Chain state currently readable</div>
         </div>
 
         <div className="card stat c-stat-3">
           <div className="stat-head">
-            <div className="stat-title">Torque Events</div>
+            <div className="stat-title">DAMM v2 Pools</div>
             <div className="stat-arrow">
               <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
-          <div className="stat-value">{acceptedEvents.length}</div>
-          <div className="stat-foot">Torque accepted receipts</div>
+          <div className="stat-value">{meteoraLaunches.filter((launch) => launch.dbc?.liveStatus?.migrationProgress === 3).length}</div>
+          <div className="stat-foot">Completed migrations</div>
         </div>
 
         <div className="card stat c-stat-4">
           <div className="stat-head">
-            <div className="stat-title">Active Campaigns</div>
+            <div className="stat-title">SOL on DBC curves</div>
             <div className="stat-arrow">
               <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
-          <div className="stat-value">{activeCampaigns}</div>
-          <div className="stat-foot">Real campaign records</div>
+          <div className="stat-value">{formatSol(liveMeteoraLaunches.reduce((total, launch) => total + poolRaisedSol(launch), 0))}</div>
+          <div className="stat-foot">Live on-chain quote reserves</div>
         </div>
 
         <div className="card c-analytics">
           <div className="analytics-head">
-            <h3>Buy Volume Events · last 7 days</h3>
+            <h3>Verified DBC trade volume · last 7 days</h3>
             <div className="menu" style={{ marginLeft: "auto", color: "var(--muted)", cursor: "pointer", padding: "6px 8px", borderRadius: 8 }}>
               <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                 <circle cx="5" cy="12" r="1.6" fill="currentColor" />
@@ -314,7 +318,7 @@ export default function DashboardOverview() {
             ))}
           </div>
           <div style={{ padding: "0 4px 4px", fontSize: 12, color: "var(--ink-dim)", letterSpacing: "-0.01em" }}>
-            {formatSol(totalBuySol)} total this week
+            {buyEvents.length ? `${formatSol(totalBuySol)} total this week` : "Trade verification will populate this chart."}
           </div>
         </div>
 
@@ -327,8 +331,8 @@ export default function DashboardOverview() {
           </div>
           <div className="rem-time">
             {migrationLaunch
-              ? `${migrationLaunch.sym} · ${formatSol(raisedSol)} raised of ${formatSol(targetSol)}`
-              : "Create a devnet LaunchLab token"}
+              ? `${migrationLaunch.dbc.symbol} · ${formatSol(raisedSol)} raised of ${formatSol(targetSol)}`
+              : "Create a devnet Meteora DBC token"}
           </div>
           <Link href="/launches" className="rem-btn">
             Open launches
@@ -337,7 +341,7 @@ export default function DashboardOverview() {
 
         <div className="card c-project">
           <div className="plist-head">
-            <h3>Your launches</h3>
+            <h3>Recent launches</h3>
             <Link href="/launches" className="plist-new">
               <svg viewBox="0 0 24 24" fill="none">
                 <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
@@ -348,13 +352,11 @@ export default function DashboardOverview() {
           <div className="plist">
             {visibleLaunches.map((launch) => (
               <div key={launch.sym} className="p-item">
-                <TokenIcon symbol={launch.sym} size={34} />
+                <TokenIcon symbol={launch.dbc?.symbol || launch.sym} size={34} />
                 <div className="p-body">
-                  <div className="p-name">{launch.sym}</div>
+                  <div className="p-name">{launch.dbc?.symbol || launch.sym}</div>
                   <div className="p-meta">
-                    {launch.raydium?.poolId
-                      ? `${formatPct(poolProgress(launch))} · ${launch.buyers || 0} buyer${Number(launch.buyers || 0) === 1 ? "" : "s"}`
-                      : launch.status}
+                    {launch.dbc?.pool ? `${formatPct(poolProgress(launch))} toward migration` : launch.status}
                   </div>
                 </div>
               </div>
@@ -374,7 +376,7 @@ export default function DashboardOverview() {
               <ActivityRow key={event.id} event={event} now={now} />
             ))}
             {visibleEvents.length === 0 && (
-              <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>No Torque event receipts yet.</div>
+              <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>No verified DBC activity yet.</div>
             )}
           </div>
         </div>
@@ -405,7 +407,7 @@ export default function DashboardOverview() {
             </svg>
             <div className="gauge-value">
               <div className="pct">{formatPct(migrationProgress)}</div>
-              <div className="lbl">{migrationLaunch ? `${migrationLaunch.sym} live pool` : "No pool yet"}</div>
+              <div className="lbl">{migrationLaunch ? `${migrationLaunch.dbc.symbol} live pool` : "No pool yet"}</div>
             </div>
           </div>
           <div className="gauge-legend">
@@ -415,7 +417,7 @@ export default function DashboardOverview() {
         </div>
 
         <div className="card dark tracker c-tracker">
-          <h3>Uptime</h3>
+          <h3>Launch age</h3>
           <div className="time">{uptimeDisplay}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: healthTone, marginTop: 4 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", boxShadow: "0 0 6px currentColor", flexShrink: 0 }} />

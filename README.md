@@ -1,68 +1,39 @@
-# Toluva
+# Toluva × Meteora
 
-![Toluva](public/image.png)
+Toluva is becoming a self-service Meteora DBC launchpad. A creator can review a launch recipe, sign a DBC config and token pool with their own Solana wallet, and publish an on-chain launch record. The first recipe, **Conviction v1**, uses a SOL quote and targets DAMM v2 graduation.
 
-Incentive-native token launchpad built on Raydium LaunchLab. Every launch ships with Torque-powered growth campaigns attached from day one — early buyer leaderboards, referral raffles, and migration sprints.
+This repository began as Toluva's Raydium LaunchLab + Torque hackathon project. Its original [README](docs/torque-original-readme.md), [plan](docs/torque-original-plan.md) and [devnet proof](docs/devnet-proof.md) are retained as prior-work records. They are not evidence of a Meteora launch. The current [build plan](plan.md) and [economic specification](docs/conviction-v1.md) identify the new work.
 
-## What's Built
+## Current state
 
-- Token launch through Raydium LaunchLab on devnet — real bonding curve, real pool, real on-chain transaction
-- Buy flow with wallet signing, devnet submission, and live pool state decoding
-- 10 Torque custom events emitted across the full launch lifecycle (`token_launch_created` → `first_buy_completed` → `token_migrated` → `reward_claimed`)
-- Recurring leaderboard incentive created via Torque MCP, funded on mainnet, with real recipient allocations
-- Creator dashboard: bonding curve progress, buy history, early buyer leaderboard, event receipts
-- Friction log documenting every Raydium and Torque integration rough edge (`docs/friction-log.md`)
+- The Meteora DBC SDK is pinned at `1.5.13` and the Conviction config passes SDK validation at supported graduation targets.
+- The API builds unsigned config and pool transactions. The browser generates the extra signers, and the connected wallet signs both transactions.
+- Pool registration checks a confirmed DBC pool, its derived address, creator and mint signatures, and the specific pool creation instruction. Name, symbol and URI are decoded from that instruction.
+- The public launch page reads live DBC progress and on-chain config terms. The creator can resume after a confirmed config or retry registration after a confirmed pool.
+- Exact-input DBC quote and buy/sell transaction builders are wired to a wallet-signed trade card with slippage and minimum-received review. Read-only quotes and unsigned swap builds worked against a live devnet pool; a wallet-signed trade remains untested.
+- A creator-signed devnet DBC config and wallet-signed token pool are [confirmed on chain](docs/meteora-proof.md). The live pool is readable and quotable. A wallet-signed trade, migration execution, general-purpose metadata hosting, verified campaigns and rewards are still in the [plan](plan.md). New DBC launch pages do not present those as live features.
 
-## Run Locally
+## Run locally
+
+Use Node 20 or newer. With Node 24:
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Starts both the API (port 8787) and frontend (port 5173) together.
+The frontend runs on port 5173 and the API on port 8787. Run `npm test` for the economic config checks and `npm run build` for the production frontend build.
 
-```bash
-npm run api      # API only
-npm run dev:web  # frontend only
-```
+For a public deployment, configure `VITE_TOLUVA_API_URL` with a reachable API origin. The frontend shows an API error if it is missing. Configure `SOLANA_CLUSTER=devnet` and `SOLANA_RPC_URL` for the API; set `VITE_SOLANA_RPC_URL` to an RPC for the same cluster. The launch flow currently rejects non-devnet pool/config creation. Supabase remains optional locally; a persistent public registry needs the updated [schema](scripts/supabase-schema.sql) with the `dbc` column.
 
-## Environment Variables
+Creators need a Solana browser wallet, devnet SOL for account rent and fees, and a public HTTPS token metadata JSON URI. Toluva does not hold creator keys or silently substitute a demo wallet.
 
-Copy `.env.example` to `.env` and fill in:
+## Next integration gates
 
-```
-TORQUE_EVENT_API_KEY=   # from platform.torque.so/developer
-TORQUE_MCP_API_KEY=     # from platform.torque.so/connect-mcp
-TORQUE_PROJECT_ID=      # your Torque project ID
-SOLANA_CLUSTER=devnet
-```
+1. Submit and inspect a wallet-signed DBC trade through the normal token page.
+2. Add general-purpose metadata hosting so creators do not need to supply their own URI.
+3. Track graduation into DAMM v2 and read migrated positions and locks.
+4. Verify participation from confirmed transactions before enabling campaign rewards.
 
-Without `TORQUE_EVENT_API_KEY`, events record locally as `torque_skipped` instead of reaching Torque — the dashboard still works.
-
-## Build
-
-```bash
-npm run build
-```
-
-## Deploy
-
-**Frontend — Vercel**
-
-`vercel.json` handles SPA routing. Settings:
-- Framework: `Vite`
-- Build command: `npm run build`
-- Output directory: `dist`
-- Set `VITE_TOLUVA_API_URL` to your deployed API URL
-
-**Backend — Railway**
-
-See deployment guide below. Set the same env vars as above plus `PORT` (Railway injects this automatically).
-
-## Docs
-
-- `docs/api.md` — API route reference
-- `docs/friction-log.md` — Raydium and Torque integration friction log
-- `docs/torque-mcp-runbook.md` — Torque MCP setup and event/incentive IDs
-- `docs/devnet-proof.md` — First devnet launch proof (token TLV741, real pool and tx)
+See [plan.md](plan.md) for exit criteria and evidence standards.
+The [read-only devnet validation record](docs/meteora-readonly-validation.md) distinguishes third-party pool checks from a Toluva-owned launch.

@@ -3,6 +3,7 @@ import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { getLaunchFilters, refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
+import { getJson } from "../../../lib/toluvaApi";
 
 const statusMap = {
   bonding:   { label: "Bonding",   pill: "progress"  },
@@ -278,58 +279,94 @@ const monoInputStyle = { ...inputStyle, fontFamily: "'Geist Mono', monospace" };
 function NewLaunchForm({ wallet, onClose, onLaunched }) {
   const [form, setForm] = React.useState(() => ({
     name: "",
-    symbol: `TLV${Math.floor(Math.random() * 900 + 100)}`,
-    description: "",
-    image: null,
-    uri: "https://example.com/toluva-devnet-token.json",
-    buyAmount: "10000000",
-    supply: "1000000000000000",
-    totalSellA: "793100000000000",
-    totalFundRaisingB: "85000000000",
+    symbol: "",
+    uri: "",
+    migrationThresholdSol: "5",
   }));
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
-  const [state, setState] = React.useState({ status: "idle", error: null, result: null, diagnostics: null });
+  const [terms, setTerms] = React.useState(null);
+  const [pending, setPending] = React.useState(null);
+  const [state, setState] = React.useState({ status: "idle", error: null, result: null, stage: null });
 
   const update = (field) => (e) => setForm((c) => ({ ...c, [field]: e.target.value }));
-  const setImage = (image) => setForm((c) => ({ ...c, image }));
+  const draftKey = wallet.address ? `toluva:dbc-draft:${wallet.address}` : null;
+
+  React.useEffect(() => {
+    setPending(null);
+    if (!draftKey) return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(draftKey) || "null");
+      if (saved?.form && (saved?.config || saved?.proof)) {
+        setForm(saved.form);
+        setPending(saved);
+      }
+    } catch { /* Ignore malformed local draft. */ }
+  }, [draftKey]);
+
+  React.useEffect(() => {
+    let live = true;
+    setTerms(null);
+    getJson(`/api/meteora/terms?migrationThresholdSol=${encodeURIComponent(form.migrationThresholdSol)}`)
+      .then((data) => { if (live) setTerms(data.terms || null); })
+      .catch(() => { if (live) setTerms(null); });
+    return () => { live = false; };
+  }, [form.migrationThresholdSol]);
+
+  function savePending(next) {
+    setPending(next);
+    if (draftKey) window.localStorage.setItem(draftKey, JSON.stringify(next));
+  }
 
   async function submit(e) {
     e.preventDefault();
-    if (!form.name.trim()) {
-      setState({ status: "error", error: "Token name is required.", result: null, diagnostics: null });
+    if (!form.name.trim() || !/^[A-Za-z0-9]{2,10}$/.test(form.symbol.trim())) {
+      setState({ status: "error", error: "Enter a token name and a 2–10 character letter/number symbol.", result: null });
       return;
     }
-    setState({ status: "submitting", error: null, result: null, diagnostics: null });
+    if (!/^https:\/\//.test(form.uri.trim())) {
+      setState({ status: "error", error: "Enter a publicly hosted HTTPS token metadata JSON URI.", result: null });
+      return;
+    }
+    setState({ status: "submitting", error: null, result: null, stage: "Preparing launch…" });
     try {
-      const { launchDevnetToken } = await import("../../../lib/raydiumLaunchlab");
-      const result = await launchDevnetToken({ wallet, launch: form });
+      const { launchMeteoraToken, registerConfirmedMeteoraLaunch } = await import("../../../lib/meteoraDbc");
+      const result = pending?.proof
+        ? { ...(await registerConfirmedMeteoraLaunch(pending.proof)), ...pending.proof }
+        : await launchMeteoraToken({
+          wallet,
+          launch: form,
+          configAddress: pending?.config?.address,
+          onStage: (stage) => setState((current) => ({ ...current, stage })),
+          onConfigConfirmed: (created) => savePending({ form, config: created }),
+          onPoolConfirmed: (proof) => savePending({ form, config: { address: proof.config }, proof }),
+        });
+      if (draftKey) window.localStorage.removeItem(draftKey);
       await refreshRegistry({ force: true });
-      setState({ status: "submitted", error: null, result, diagnostics: result.diagnostics || null });
+      setState({ status: "submitted", error: null, result, stage: null });
       onLaunched?.(result);
     } catch (err) {
       setState({
         status: "error",
         error: err instanceof Error ? err.message : "Launch failed.",
         result: null,
-        diagnostics: err?.diagnostics || null,
+        stage: null,
       });
     }
   }
 
-  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected";
+  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected" || !terms;
 
   return (
     <form className="card" onSubmit={submit} style={{ padding: 28 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--green)", letterSpacing: "0.18em", textTransform: "uppercase" }}>
-            Raydium devnet
+            Meteora DBC · devnet
           </div>
           <h3 style={{ margin: "4px 0 4px", fontSize: 22, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--ink)" }}>
-            New LaunchLab token
+            New conviction launch
           </h3>
           <div style={{ fontSize: 13, color: "var(--ink-dim)", maxWidth: 480, lineHeight: 1.5 }}>
-            Generates a mint keypair in-browser, asks your wallet to sign, and submits to devnet. Torque telemetry fires on launch.
+            Create your own launch config and token pool with your wallet. Review the economics before signing.
           </div>
         </div>
         <button
@@ -348,84 +385,45 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
         </button>
       </div>
 
-      <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "200px 1fr", gap: 22 }}>
-        <ImageDropzone value={form.image} onChange={setImage} />
-
+      <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Field label="Token name">
-            <input value={form.name} onChange={update("name")} placeholder="e.g. Toluva Devnet Token" style={inputStyle} />
+            <input value={form.name} onChange={update("name")} placeholder="Your token name" style={inputStyle} />
           </Field>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Symbol" hint="3–6 characters">
+            <Field label="Symbol" hint="2–10 letters or numbers">
               <input value={form.symbol} onChange={update("symbol")} maxLength={10} style={{ ...monoInputStyle, textTransform: "uppercase" }} />
             </Field>
-            <Field label="Metadata URI" hint="Off-chain JSON">
-              <input value={form.uri} onChange={update("uri")} style={monoInputStyle} />
+            <Field label="Metadata URI" hint="Public HTTPS token JSON">
+              <input value={form.uri} onChange={update("uri")} placeholder="https://…/token.json" style={monoInputStyle} />
             </Field>
           </div>
 
-          <Field label="Description" hint="Optional · 1–2 sentences shown on the token page">
-            <textarea
-              value={form.description}
-              onChange={update("description")}
-              rows={3}
-              placeholder="What is this token about?"
-              style={{ ...inputStyle, resize: "vertical", minHeight: 70, fontFamily: "'Geist', sans-serif" }}
-            />
-          </Field>
         </div>
       </div>
 
-      {/* Advanced */}
-      <div style={{ marginTop: 18 }}>
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((o) => !o)}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            background: "transparent", border: 0, padding: "6px 0", cursor: "pointer",
-            fontSize: 12, fontWeight: 600, color: "var(--ink-dim)",
-            fontFamily: "'Geist', sans-serif",
-          }}
-        >
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" style={{ transform: advancedOpen ? "rotate(90deg)" : "none", transition: "transform 160ms" }}>
-            <path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Advanced parameters
-        </button>
-
-        {advancedOpen && (
-          <div style={{
-            marginTop: 12, padding: 16, borderRadius: 14, border: "1px solid var(--line)",
-            background: "var(--card-muted)",
-            display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12,
-          }}>
-            <Field label="Buy amount" hint="Lamports the creator pre-buys at launch">
-              <input value={form.buyAmount} onChange={update("buyAmount")} style={monoInputStyle} />
-            </Field>
-            <Field label="Supply" hint="Total token supply, with decimals">
-              <input value={form.supply} onChange={update("supply")} style={monoInputStyle} />
-            </Field>
-            <Field label="Sell A" hint="Tokens sold along the bonding curve">
-              <input value={form.totalSellA} onChange={update("totalSellA")} style={monoInputStyle} />
-            </Field>
-            <Field label="Raise B" hint="Quote raised before migration">
-              <input value={form.totalFundRaisingB} onChange={update("totalFundRaisingB")} style={monoInputStyle} />
-            </Field>
+      <div style={{ marginTop: 18, padding: 16, borderRadius: 14, border: "1px solid var(--line)", background: "var(--card-muted)", display: "grid", gap: 12 }}>
+        <Field label="Graduation target (SOL)" hint="Quote raised before DAMM v2 migration; devnet range 1–100 SOL">
+          <input type="number" min="1" max="100" step="0.1" value={form.migrationThresholdSol} onChange={update("migrationThresholdSol")} disabled={Boolean(pending?.config)} style={monoInputStyle} />
+        </Field>
+        {terms ? (
+          <div style={{ fontSize: 12, lineHeight: 1.7, color: "var(--ink-dim)" }}>
+            <strong>Conviction v{terms.version}</strong> · {terms.tokenSupply.toLocaleString()} immutable tokens · {terms.migrationSupplyPercentage}% supply reserved for migration · {terms.curveFeeBps / 100}% DBC fee · {terms.migratedPoolFeeBps / 100}% DAMM v2 fee · {terms.liquidity.creatorPermanentLockedPercentage}% of migrated liquidity permanently locked · {terms.liquidity.creatorUnlockedPercentage}% creator liquidity · no Toluva fee.
+            <div>Fee claimer and leftover receiver: <span style={{ fontFamily: "'Geist Mono', monospace" }}>{wallet.address || "your connected wallet"}</span></div>
           </div>
-        )}
+        ) : <span style={{ fontSize: 12, color: "var(--muted)" }}>Connect to the API to review launch terms.</span>}
       </div>
 
       {/* States */}
-      {wallet.connected && wallet.source !== "injected" && (
+      {!wallet.connected && (
         <Banner tone="amber" style={{ marginTop: 16 }}>
-          Demo wallet cannot sign LaunchLab transactions. Connect Phantom, Backpack, or another injected Solana wallet.
+          Connect Phantom, Backpack, or another injected Solana wallet to sign a devnet launch.
         </Banner>
       )}
       {state.status === "submitting" && (
         <Banner tone="indigo" style={{ marginTop: 16 }}>
-          Checking devnet wallet, simulating the Raydium transaction, then requesting wallet approval.
+          {state.stage || "Preparing your Meteora launch…"}
         </Banner>
       )}
       {state.error && (
@@ -434,7 +432,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
       {state.result && (
         <Banner tone="emerald" style={{ marginTop: 16 }}>
           <div style={{ fontWeight: 600 }}>Submitted to devnet</div>
-          <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5, marginTop: 3 }}>Pool {state.result.poolId}</div>
+          <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5, marginTop: 3 }}>Pool {state.result.pool}</div>
           <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5 }}>Tx {state.result.signature}</div>
         </Banner>
       )}
@@ -453,7 +451,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
           className="btn primary"
           style={disabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
         >
-          {state.status === "submitting" ? "Submitting…" : "Sign & launch on devnet"}
+          {state.status === "submitting" ? "Submitting…" : pending?.proof ? "Finish registration" : pending?.config ? "Resume token launch" : "Create config & launch"}
         </button>
       </div>
     </form>
@@ -518,6 +516,7 @@ function LaunchCard({ launch }) {
   const statusInfo = statusMap[launch.status] || { label: launch.status, pill: "pending" };
   const progress = Math.max(0, Math.min(100, Number(launch.bonded) || 0));
   const buyers = Number(launch.buyers) || 0;
+  const ticker = launch.dbc?.symbol || launch.sym;
 
   function open() {
     navigate(`/launches/${encodeURIComponent(launch.sym)}`);
@@ -553,7 +552,7 @@ function LaunchCard({ launch }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
           />
         ) : (
-          <GradientTile symbol={launch.sym} />
+          <GradientTile symbol={ticker} />
         )}
         <span
           className={`status-pill ${statusInfo.pill}`}
@@ -577,7 +576,7 @@ function LaunchCard({ launch }) {
             fontFamily: "'Geist Mono', monospace", fontSize: 11, color: "var(--muted)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
-            <span>${launch.sym}</span>
+            <span>${ticker}</span>
             <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--muted)" }} />
             <span>{launch.age || "now"}</span>
           </div>
@@ -644,7 +643,7 @@ function EmptyState({ onCreate }) {
         No launches yet
       </div>
       <div style={{ fontSize: 13.5, color: "var(--ink-dim)", maxWidth: 360, lineHeight: 1.5 }}>
-        Launch a Raydium LaunchLab token on devnet to see it here. Every launch ships with growth campaigns attached.
+        Launch a Meteora DBC token on devnet to see it here.
       </div>
       <button type="button" className="btn primary" onClick={onCreate} style={{ marginTop: 6 }}>
         <svg viewBox="0 0 24 24" fill="none">
@@ -659,12 +658,12 @@ function EmptyState({ onCreate }) {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function LaunchesPage() {
-  const { registry } = useRegistry();
+  const { registry, loading, error } = useRegistry();
   const wallet = useWallet();
-  const launches = registry.launches || [];
+  const launches = (registry.launches || []).filter((launch) => launch.dbc?.pool);
   const [filter, setFilter] = React.useState("all");
   const [showLaunchModal, setShowLaunchModal] = React.useState(false);
-  const filters = getLaunchFilters(registry);
+  const filters = getLaunchFilters({ ...registry, launches });
   const visible = launches.filter((l) => filter === "all" || l.status === filter);
 
   return (
@@ -672,7 +671,7 @@ export default function LaunchesPage() {
       <div className="page-head">
         <div>
           <h1>Launches</h1>
-          <div className="sub">Every token you've shipped through Toluva.</div>
+          <div className="sub">Explore confirmed Meteora DBC launches made through Toluva.</div>
         </div>
         <div className="actions">
           <button type="button" className="btn primary" onClick={() => setShowLaunchModal(true)}>
@@ -683,6 +682,8 @@ export default function LaunchesPage() {
           </button>
         </div>
       </div>
+
+      {error && <Banner tone="rose" style={{ marginBottom: 16 }}>Launch data is unavailable: {error}</Banner>}
 
       {showLaunchModal && (
         <Modal onClose={() => setShowLaunchModal(false)}>
@@ -700,7 +701,9 @@ export default function LaunchesPage() {
         </Modal>
       )}
 
-      {launches.length === 0 ? (
+      {loading && launches.length === 0 ? (
+        <div className="card" style={{ padding: 36, color: "var(--ink-dim)" }}>Loading launches…</div>
+      ) : launches.length === 0 ? (
         <EmptyState onCreate={() => setShowLaunchModal(true)} />
       ) : (
         <>
