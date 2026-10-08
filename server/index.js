@@ -33,6 +33,15 @@ import { emitTorqueEvent } from "./services/torque-client.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
+const lastVerifiedDbcStatus = new Map();
+
+function livePoolError(error) {
+  const message = error?.message || "";
+  if (message === "fetch failed" || /ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|network request failed/i.test(message)) {
+    return "Solana RPC is unreachable. Retrying automatically.";
+  }
+  return message || "Unable to read DBC pool.";
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -109,12 +118,22 @@ async function registryWithLivePoolState() {
       if (launch.dbc?.pool) {
         try {
           const status = await getPoolStatus(launch.dbc.pool);
-          launch.dbc = { ...launch.dbc, liveStatus: status, liveCheckedAt: new Date().toISOString(), liveError: null };
+          const checkedAt = new Date().toISOString();
+          lastVerifiedDbcStatus.set(launch.dbc.pool, { status, checkedAt });
+          launch.dbc = { ...launch.dbc, liveStatus: status, liveCheckedAt: checkedAt, liveStale: false, liveError: null };
           launch.bonded = status.progressPercent;
           launch.migrationState = status.migrationProgress === 3 ? "migrated" : status.progressPercent >= 100 ? "migrating" : "bonding";
           launch.status = launch.migrationState;
         } catch (error) {
-          launch.dbc = { ...launch.dbc, liveError: error.message || "Unable to read DBC pool.", liveCheckedAt: new Date().toISOString() };
+          const previous = lastVerifiedDbcStatus.get(launch.dbc.pool);
+          launch.dbc = {
+            ...launch.dbc,
+            liveStatus: previous?.status || null,
+            liveCheckedAt: previous?.checkedAt || null,
+            liveLastAttemptAt: new Date().toISOString(),
+            liveStale: true,
+            liveError: livePoolError(error),
+          };
         }
         return;
       }

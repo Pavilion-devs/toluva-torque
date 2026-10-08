@@ -37,3 +37,4 @@ Creators need a Solana browser wallet, devnet SOL for account rent and fees, and
 
 See [plan.md](plan.md) for exit criteria and evidence standards.
 The [read-only devnet validation record](docs/meteora-readonly-validation.md) distinguishes third-party pool checks from a Toluva-owned launch.
+The [Meteora friction log](docs/meteora-friction-log.md) records integration failures, root causes and fixes from the live creator flow.

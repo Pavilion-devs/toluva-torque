@@ -70,7 +70,7 @@ export async function refreshRegistry({ force = false } = {}) {
     return nextRegistry;
   } catch (error) {
     setRegistryState({
-      registry: fallbackRegistry,
+      registry: registryState.source === "static" ? fallbackRegistry : registryState.registry,
       source: "offline",
       loading: false,
       error: error instanceof Error ? error.message : "Registry API unavailable.",

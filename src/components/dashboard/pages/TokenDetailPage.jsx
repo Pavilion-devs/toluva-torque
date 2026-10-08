@@ -493,9 +493,10 @@ function MeteoraTradeCard({ launch }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [signature, setSignature] = React.useState(null);
-  const canTrade = launch.dbc.liveStatus?.migrationProgress === 0;
+  const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
 
   React.useEffect(() => { setQuote(null); }, [direction, amount, slippageBps, launch.dbc.pool]);
+  React.useEffect(() => { if (!canTrade) setQuote(null); }, [canTrade]);
 
   async function review() {
     setBusy(true); setError(null);
@@ -542,7 +543,7 @@ function MeteoraTradeCard({ launch }) {
           </select>
         </label>
       </div>
-      {!canTrade && <div style={{ fontSize: 12, color: "var(--muted)" }}>{launch.dbc.liveStatus ? "The DBC curve has finished; trading here is closed." : "Waiting for live pool state before trading."}</div>}
+      {!canTrade && <div style={{ fontSize: 12, color: "var(--muted)" }}>{launch.dbc.liveStale || launch.dbc.liveError ? "Live pool status is unavailable. Trading will resume after a fresh chain check." : launch.dbc.liveStatus ? "The DBC curve has finished; trading here is closed." : "Waiting for live pool state before trading."}</div>}
       {quote && <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 12, lineHeight: 1.7 }}>
         <div>Estimated received: <strong>{quote.outputAmountDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
         <div>Minimum received: <strong>{quote.minimumAmountOutDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
@@ -566,9 +567,11 @@ function MeteoraTokenDetailPage({ launch }) {
   const terms = dbc.onchainConfig || {};
   const progress = chain?.progressPercent;
   const targetSol = terms.migrationQuoteThreshold ? Number(terms.migrationQuoteThreshold) / LAMPORTS_PER_SOL : null;
-  const status = chain
-    ? chain.migrationProgress === 3 ? "Migrated to DAMM v2" : progress >= 100 ? "Curve complete · migration pending" : "Trading on DBC"
-    : "Waiting for chain status";
+  const status = dbc.liveStale || dbc.liveError
+    ? "Waiting for fresh chain status"
+    : chain
+      ? chain.migrationProgress === 3 ? "Migrated to DAMM v2" : progress >= 100 ? "Curve complete · migration pending" : "Trading on DBC"
+      : "Waiting for chain status";
   const explorer = (kind, value) => `https://explorer.solana.com/${kind}/${value}?cluster=${encodeURIComponent(dbc.cluster || "devnet")}`;
 
   return (
@@ -582,7 +585,10 @@ function MeteoraTokenDetailPage({ launch }) {
         <div className="actions"><span className={`status-pill ${chain?.migrationProgress === 3 ? "completed" : "progress"}`}>{status}</span></div>
       </div>
 
-      {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239" }}>Live pool state is unavailable: {dbc.liveError}</div>}
+      {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <span>{dbc.liveError}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
+        <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
+      </div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
         <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
