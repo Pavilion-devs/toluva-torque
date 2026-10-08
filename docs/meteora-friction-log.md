@@ -16,4 +16,6 @@ These are issues encountered during the Toluva devnet build and normal wallet fl
 - **Product behavior:** A failed read now carries the last verified pool state with a stale marker and timestamp. The page pauses trading, discards a previously reviewed quote, explains the RPC outage, and offers a retry. A separate API outage preserves the last loaded registry instead of replacing the user's launches with static fallback data. Fresh chain data is required before trading resumes.
 - **Validation:** An isolated RPC fault test served a fresh pool state, then severed the RPC connection. The API returned the previous state with `liveStale: true`, a preserved `liveCheckedAt`, and a clear retry message. After restoring connectivity, the real devnet pool and buy quote returned successfully.
 
+![Recovered devnet pool status and fresh 0.001 SOL buy quote](meteora-rpc-recovered.png)
+
 The first wallet-signed DBC trade remains separate evidence in the [proof record](meteora-proof.md).
