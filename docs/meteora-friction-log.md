@@ -18,4 +18,4 @@ These are issues encountered during the Toluva devnet build and normal wallet fl
 
 ![Recovered devnet pool status and fresh 0.001 SOL buy quote](meteora-rpc-recovered.png)
 
-The first wallet-signed DBC trade remains separate evidence in the [proof record](meteora-proof.md).
+The first wallet-signed DBC buy succeeded after RPC access was restored. Its transaction and received token balance are recorded in the [proof record](meteora-proof.md).
