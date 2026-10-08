@@ -45,4 +45,8 @@ This records the first Toluva-owned Meteora DBC pilot launched through the ordin
 - DAMM v2 migration and position state: pending.
 - Verified campaign and reward evidence: pending.
 
+The lifecycle reader currently reports this pilot as `bonding`, with `990,000` quote-reserve lamports against the `1,000,000,000` lamport graduation target. It derives prospective DAMM v2 pool `3PUTDKRphNrbXw8MtVa1HvFBGek2fS6NEDM1tyZogbsj` from the on-chain DBC config, mint and Meteora's fee-option mapping. That address has not been created yet. The migration build endpoint correctly rejects this pool as ineligible. A separate SDK build, never signed or submitted, produced a 1,139-byte migration transaction with the expected DBC instruction, DAMM v2 pool/config accounts and two position NFT signers. This confirms transaction construction and account mapping only; the migration and post-migration reader still need a live end-to-end proof.
+
+The normal trade UI reviewed a `1.009101011` SOL graduation buy. Its unsigned transaction simulated without error against the current devnet state. The simulated post-transaction DBC account had exactly `1,000,000,000` quote-reserve lamports, migration progress `2` (`LockedVesting`) and `isMigrated = 0`. This is a predicted post-state, not an executed buy. The reviewed quote screenshot is [graduation-quote-review.png](graduation-quote-review.png).
+
 The first pool build attempt exposed a schema mapping error: the SDK builder accepts nested `migratedPoolFee`, while decoded on-chain `PoolConfig` stores `migratedPoolFeeBps` at the top level. The confirmed config was unaffected. The reader now uses the on-chain field, and an unsigned pool transaction using this config passed devnet simulation before the successful wallet-signed launch.

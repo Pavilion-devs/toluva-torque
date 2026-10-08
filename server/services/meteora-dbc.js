@@ -1,14 +1,18 @@
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
-import { NATIVE_MINT } from "@solana/spl-token";
+import { getAccount, NATIVE_MINT, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import {
   ActivationType,
   BaseFeeMode,
   buildCurve,
   CollectFeeMode,
   DammV2DynamicFeeMode,
+  DAMM_V2_MIGRATION_FEE_ADDRESS,
   deriveDbcPoolAddress,
+  deriveDammV2PoolAddress,
+  derivePositionNftAccount,
   DynamicBondingCurveClient,
+  createDammV2Program,
   MigratedCollectFeeMode,
   MigrationFeeOption,
   MigrationOption,
@@ -19,6 +23,7 @@ import {
   validateConfigParameters,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { config } from "../config.js";
+import { hasLockedVesting, migrationReady, migrationStage } from "./meteora-lifecycle.js";
 
 export const METEORA_DBC_PROGRAM = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";
 export const CONVICTION_RECIPE_VERSION = 1;
@@ -26,6 +31,7 @@ export const DEFAULT_THRESHOLD_SOL = 5;
 
 const connection = new Connection(config.solana.rpcUrl, config.solana.commitment);
 const client = DynamicBondingCurveClient.create(connection, config.solana.commitment);
+const dammProgram = createDammV2Program(connection, config.solana.commitment);
 
 function badRequest(message) {
   const error = new Error(message);
@@ -332,16 +338,112 @@ export async function getPoolStatus(poolAddress) {
   const poolKey = key(poolAddress, "Pool");
   const pool = await client.state.getPool(poolKey);
   if (!pool) badRequest("DBC pool was not found on this network.");
-  const progress = await client.state.getPoolQuoteTokenCurveProgress(poolKey);
   const state = pool.poolState;
+  const configState = await client.state.getPoolConfig(state.config);
+  if (!configState) badRequest("DBC config was not found on this network.");
+  if (Number(configState.migrationOption) !== MigrationOption.MET_DAMM_V2) badRequest("This pool does not migrate to DAMM v2.");
+  const dammConfig = DAMM_V2_MIGRATION_FEE_ADDRESS[Number(configState.migrationFeeOption)];
+  if (!dammConfig) badRequest("Unsupported DAMM v2 migration fee option.");
+  const dammPool = deriveDammV2PoolAddress(dammConfig, state.baseMint, configState.quoteMint);
+  const stage = migrationStage(state, configState.migrationQuoteThreshold);
+  const progress = stage === "bonding" ? await client.state.getPoolQuoteTokenCurveProgress(poolKey) : 1;
+  const dammV2 = {
+    config: dammConfig.toBase58(),
+    pool: dammPool.toBase58(),
+    verified: false,
+    positions: [],
+  };
+  if (stage === "created-pool") {
+    const migrated = await dammProgram.account.pool.fetchNullable(dammPool);
+    const baseIsTokenA = migrated?.tokenAMint.equals(state.baseMint) && migrated?.tokenBMint.equals(configState.quoteMint);
+    const baseIsTokenB = migrated?.tokenBMint.equals(state.baseMint) && migrated?.tokenAMint.equals(configState.quoteMint);
+    if (!baseIsTokenA && !baseIsTokenB) {
+      throw new Error("DBC reports migration, but the expected DAMM v2 pool cannot be verified.");
+    }
+    dammV2.verified = true;
+    dammV2.tokenAMint = migrated.tokenAMint.toBase58();
+    dammV2.tokenBMint = migrated.tokenBMint.toBase58();
+    dammV2.liquidity = migrated.liquidity.toString();
+    dammV2.permanentLockLiquidity = migrated.permanentLockLiquidity.toString();
+    dammV2.tokenAAmount = migrated.tokenAAmount.toString();
+    dammV2.tokenBAmount = migrated.tokenBAmount.toString();
+    dammV2.poolStatus = migrated.poolStatus;
+    const baseFeeBytes = Buffer.from(migrated.poolFees.baseFee.baseFeeInfo.data);
+    dammV2.initialBaseFeeBps = Number(baseFeeBytes.readBigUInt64LE(0)) / 100_000;
+    dammV2.collectFeeMode = migrated.collectFeeMode;
+    try {
+      const positions = await dammProgram.account.position.all([{ memcmp: { offset: 8, bytes: dammPool.toBase58() } }]);
+      dammV2.positions = await Promise.all(positions.filter(({ account }) => account.pool.equals(dammPool)).map(async ({ publicKey, account }) => {
+        const nftAccount = derivePositionNftAccount(account.nftMint);
+        const position = {
+          address: publicKey.toBase58(),
+          nftMint: account.nftMint.toBase58(),
+          nftAccount: nftAccount.toBase58(),
+          unlockedLiquidity: account.unlockedLiquidity.toString(),
+          vestedLiquidity: account.vestedLiquidity.toString(),
+          permanentLockedLiquidity: account.permanentLockedLiquidity.toString(),
+          pendingBaseFee: decimalAmount(baseIsTokenA ? account.feeAPending : account.feeBPending, configState.tokenDecimal),
+          pendingQuoteFee: decimalAmount(baseIsTokenA ? account.feeBPending : account.feeAPending, 9),
+        };
+        try {
+          const token = await getAccount(connection, nftAccount, config.solana.commitment, TOKEN_2022_PROGRAM_ID);
+          if (!token.mint.equals(account.nftMint) || token.amount !== 1n) throw new Error("Position NFT account does not hold its expected mint.");
+          position.nftHolder = token.owner.toBase58();
+        } catch (error) {
+          position.ownerError = error.message || "Position NFT holder could not be verified.";
+        }
+        return position;
+      }));
+    } catch (error) {
+      dammV2.positionError = error.message || "Position accounts are unavailable.";
+    }
+  }
   return {
     pool: poolKey.toBase58(),
     config: state.config.toBase58(),
     mint: state.baseMint.toBase58(),
     creator: state.creator.toBase58(),
     migrationProgress: state.migrationProgress,
+    migrationStage: stage,
+    migrationReady: migrationReady(state, configState),
+    lockedVesting: hasLockedVesting(configState),
+    isMigrated: Number(state.isMigrated) === 1,
+    finishCurveTimestamp: state.finishCurveTimestamp.toString(),
+    migrationQuoteThresholdLamports: configState.migrationQuoteThreshold.toString(),
     quoteReserveLamports: state.quoteReserve.toString(),
     progressPercent: Math.round(progress * 10000) / 100,
+    dammV2,
+  };
+}
+
+export async function buildMigrationTransaction(input) {
+  if (config.solana.cluster !== "devnet") badRequest("Manual DAMM v2 migration is currently enabled on devnet only.");
+  const payer = key(input.payer, "Payer");
+  const poolKey = key(input.pool, "Pool");
+  const status = await getPoolStatus(poolKey);
+  if (!status.migrationReady) badRequest("This DBC pool is not ready for DAMM v2 migration.");
+  const dammConfig = key(status.dammV2.config, "DAMM v2 config");
+  await dammProgram.account.config.fetch(dammConfig);
+  const built = await client.migration.migrateToDammV2({ payer, pool: poolKey, dammConfig });
+  const signers = [built.firstPositionNftKeypair, built.secondPositionNftKeypair];
+  if (!built.transaction.instructions.some((instruction) => instruction.programId.toBase58() === METEORA_DBC_PROGRAM
+    && instruction.keys.some((account) => account.pubkey.equals(poolKey))
+    && instruction.keys.some((account) => account.pubkey.toBase58() === status.dammV2.pool)
+    && signers.every((signer) => instruction.keys.some((account) => account.pubkey.equals(signer.publicKey) && account.isSigner)))) {
+    throw new Error("Meteora SDK returned an unexpected migration transaction.");
+  }
+  const latest = await connection.getLatestBlockhash(config.solana.commitment);
+  built.transaction.feePayer = payer;
+  built.transaction.recentBlockhash = latest.blockhash;
+  built.transaction.partialSign(...signers);
+  return {
+    transaction: built.transaction.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64"),
+    blockhash: latest.blockhash,
+    lastValidBlockHeight: latest.lastValidBlockHeight,
+    pool: status.pool,
+    dammPool: status.dammV2.pool,
+    dammConfig: status.dammV2.config,
+    positionNftMints: signers.map((signer) => signer.publicKey.toBase58()),
   };
 }
 

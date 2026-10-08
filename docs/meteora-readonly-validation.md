@@ -23,6 +23,14 @@ This pool uses Token-2022, so it was used only for the trading path. Conviction 
 - `verifyPoolLaunch` accepted the pool PDA, pool/config/mint/creator relationship, creator and mint signatures, and the DBC `initializeVirtualPoolWithSplToken` instruction. It decoded `Cabal Prime`, `CPRIME3` and the metadata URI from that confirmed instruction.
 - The verifier was called directly for this check. This third-party pool was **not** registered in Toluva's launch registry.
 
+## Graduated DAMM v2 reader
+
+- Third-party migrated DBC pool: [`5vAcux8aWUMS7HRsyNjqWVB2rxTFLxvtTDJ97yS7tB6`](https://explorer.solana.com/address/5vAcux8aWUMS7HRsyNjqWVB2rxTFLxvtTDJ97yS7tB6?cluster=devnet).
+- The DBC account reports migration progress `3`. The reader derives successor DAMM v2 pool [`Fr3EYjXUdmUVxC9YFUminQrfoBWhPPDqgGL2Bq64Yr7g`](https://explorer.solana.com/address/Fr3EYjXUdmUVxC9YFUminQrfoBWhPPDqgGL2Bq64Yr7g?cluster=devnet) from the DBC config and mints, fetches that account, and verifies its two token mints.
+- The DAMM account decoded with an initial base fee of 100 bps and two position accounts. Both position NFT accounts were checked to hold exactly one of their corresponding mints; their token-account authority was `2Umtb4vJFWoNxzBfh4h2wdKRFWvrGNwNWQp2dqBemG28`. The reader also decoded unlocked, vested and permanently locked liquidity and pending fees.
+- A second migrated third-party DBC pool, [`1U6hc9wXXh72wCMsN1Fnces4ekGnw4U3qamp5K8XDd7`](https://explorer.solana.com/address/1U6hc9wXXh72wCMsN1Fnces4ekGnw4U3qamp5K8XDd7?cluster=devnet), independently returned a verified DAMM v2 pool and one NFT-backed position.
+- These are read-only compatibility checks. They do not prove Toluva's pilot has graduated or that the manual migration transaction succeeds.
+
 ## Next proof
 
 Use the normal creator UI with an injected Solana wallet and a public HTTPS metadata JSON URI. Record the creator-paid config signature, pool signature, config/mint/pool addresses, wallet-signed buy and sell signatures, account data and public page. Continue through DBC completion and DAMM v2 migration before claiming the full lifecycle is proven.

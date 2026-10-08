@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { getInjectedWalletProvider } from "./walletAdapter";
 import { postJson } from "./toluvaApi";
 
@@ -134,4 +134,46 @@ export async function tradeMeteoraToken({ wallet, reviewedQuote }) {
   }, "confirmed");
   if (confirmation.value.err) throw new Error(`Trade failed: ${JSON.stringify(confirmation.value.err)}`);
   return { signature, quote: built.quote };
+}
+
+export async function migrateMeteoraPool({ wallet, status }) {
+  if (!wallet?.address || wallet.source !== "injected") throw new Error("Connect a Solana wallet before migrating.");
+  if (!status?.migrationReady || !status?.dammV2?.pool) throw new Error("Refresh the pool status before migrating.");
+  const provider = getInjectedWalletProvider();
+  if (!provider?.signTransaction || provider.publicKey?.toString() !== wallet.address) throw new Error("Reconnect your Solana wallet.");
+  const built = await postJson("/api/meteora/migration/build", { payer: wallet.address, pool: status.pool });
+  if (built.pool !== status.pool || built.dammPool !== status.dammV2.pool || built.dammConfig !== status.dammV2.config) {
+    throw new Error("The migration destination changed. Refresh before signing.");
+  }
+  const transaction = transactionFromBase64(built.transaction);
+  const walletKey = new PublicKey(wallet.address);
+  const migrationInstructions = transaction.instructions.filter(({ programId }) => programId.equals(DBC_PROGRAM));
+  const ix = migrationInstructions[0];
+  const expectedDiscriminator = [156, 169, 230, 103, 53, 228, 80, 64];
+  if (!transaction.feePayer?.equals(walletKey)
+      || !transaction.signatures.some(({ publicKey }) => publicKey.equals(walletKey))
+      || migrationInstructions.length !== 1
+      || transaction.instructions.some(({ programId }) => !programId.equals(DBC_PROGRAM) && !programId.equals(ComputeBudgetProgram.programId))
+      || !expectedDiscriminator.every((byte, index) => ix.data[index] === byte)
+      || ix.keys[0]?.pubkey.toBase58() !== status.pool
+      || ix.keys[4]?.pubkey.toBase58() !== status.dammV2.pool
+      || ix.keys[19]?.pubkey.toBase58() !== wallet.address
+      || !ix.keys.some(({ pubkey }) => pubkey.toBase58() === status.dammV2.config)
+      || built.positionNftMints?.length !== 2
+      || ix.keys[5]?.pubkey.toBase58() !== built.positionNftMints[0]
+      || ix.keys[8]?.pubkey.toBase58() !== built.positionNftMints[1]
+      || !built.positionNftMints.every((mint) => transaction.signatures.some(({ publicKey, signature }) => publicKey.toBase58() === mint && signature))) {
+    throw new Error("Migration transaction differs from the reviewed pool and signer accounts.");
+  }
+  const signed = await provider.signTransaction(transaction);
+  if (!signed.verifySignatures()) throw new Error("The wallet did not preserve all required migration signatures.");
+  const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || DEVNET_RPC, "confirmed");
+  const signature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 3, skipPreflight: false });
+  const confirmation = await connection.confirmTransaction({
+    signature,
+    blockhash: built.blockhash,
+    lastValidBlockHeight: built.lastValidBlockHeight,
+  }, "confirmed");
+  if (confirmation.value.err) throw new Error(`Migration failed: ${JSON.stringify(confirmation.value.err)}`);
+  return { signature, dammPool: built.dammPool, positionNftMints: built.positionNftMints };
 }

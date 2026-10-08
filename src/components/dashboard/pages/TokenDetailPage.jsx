@@ -561,6 +561,79 @@ function MeteoraTradeCard({ launch }) {
   );
 }
 
+function MeteoraMigrationCard({ launch, explorer }) {
+  const wallet = useWallet();
+  const chain = launch.dbc.liveStatus;
+  const damm = chain?.dammV2;
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [signature, setSignature] = React.useState(null);
+  const fresh = !launch.dbc.liveStale && !launch.dbc.liveError;
+  const ready = fresh && chain?.migrationReady;
+  const stageText = {
+    bonding: "DBC trading",
+    "curve-complete": "Curve complete · ready to migrate",
+    "post-bonding": "Preparing migration",
+    "locked-vesting": "Vesting prepared · ready to migrate",
+    "created-pool": damm?.verified ? "DAMM v2 pool verified" : "Checking DAMM v2 pool",
+    unknown: "Unknown chain stage",
+  }[chain?.migrationStage] || "Waiting for chain status";
+
+  async function migrate() {
+    setBusy(true); setError(null);
+    try {
+      const { migrateMeteoraPool } = await import("../../../lib/meteoraDbc");
+      const result = await migrateMeteoraPool({ wallet, status: chain });
+      setSignature(result.signature);
+      await refreshRegistry({ force: true });
+    } catch (cause) {
+      setError(cause.message || "Migration failed.");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card" style={{ padding: 24, display: "grid", alignContent: "start", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>DBC → DAMM v2</h3>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>The graduation path, read from Solana devnet</div>
+      </div>
+      <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 13 }}>
+        <strong>{stageText}</strong>
+        {chain && <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 12 }}>{Number(chain.quoteReserveLamports) / LAMPORTS_PER_SOL} SOL in DBC quote reserve · {chain.progressPercent.toFixed(2)}% of target</div>}
+      </div>
+      {damm && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
+        <span style={{ color: "var(--muted)" }}>{damm.verified ? "DAMM v2 pool" : "Expected DAMM v2 pool"}</span>
+        <a href={explorer("address", damm.pool)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>{shortAddress(damm.pool)} ↗</a>
+      </div>}
+      {damm?.verified && <>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+          <StatTile label="Pool state" value={damm.poolStatus === 0 ? "Enabled" : "Disabled"} />
+          <StatTile label="Positions" value={damm.positionError ? "Unavailable" : String(damm.positions.length)} />
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>DAMM v2 initial base fee: {damm.initialBaseFeeBps / 100}% · pool liquidity: {damm.liquidity} units · permanently locked: {damm.permanentLockLiquidity} units</div>
+        {damm.positions.map((position, index) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12, lineHeight: 1.7 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><strong>Position {index + 1}</strong><a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.address)} ↗</a></div>
+          {position.nftHolder && <div style={{ color: "var(--muted)" }}>NFT holder: <a href={explorer("address", position.nftHolder)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.nftHolder)} ↗</a></div>}
+          {position.ownerError && <div style={{ color: "#9f1239" }}>NFT holder could not be verified: {position.ownerError}</div>}
+          <div style={{ color: "var(--muted)" }}>Unlocked liquidity: {position.unlockedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Vested liquidity: {position.vestedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Permanently locked liquidity: {position.permanentLockedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Pending fees: {position.pendingBaseFee} {launch.dbc.symbol} · {position.pendingQuoteFee} SOL</div>
+          <a href={explorer("address", position.nftMint)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position NFT {shortAddress(position.nftMint)} ↗</a>
+        </div>)}
+        {damm.positionError && <div style={{ color: "#9f1239", fontSize: 12 }}>Position accounts could not be read: {damm.positionError}</div>}
+      </>}
+      {fresh && chain?.migrationStage === "bonding" && <div style={{ fontSize: 12, color: "var(--muted)" }}>Trading continues on DBC until the on-chain graduation target is reached.</div>}
+      {fresh && chain?.lockedVesting && chain?.migrationStage !== "created-pool" && <div style={{ fontSize: 12, color: "var(--muted)" }}>This pool requires a vesting locker before migration. Manual migration here supports launches without locked vesting.</div>}
+      {ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Meteora may migrate this pool automatically. If it remains pending, a connected wallet can submit the migration and pay the network costs.</div>}
+      {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {signature && <a href={explorer("tx", signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed migration {shortAddress(signature)} ↗</a>}
+      {ready && <button type="button" className="btn primary" disabled={busy} onClick={wallet.connected ? migrate : wallet.connect}>{busy ? "Signing migration…" : wallet.connected ? "Migrate to DAMM v2" : "Connect wallet to migrate"}</button>}
+      {!fresh && <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Refresh chain status</button>}
+    </div>
+  );
+}
+
 function MeteoraTokenDetailPage({ launch }) {
   const dbc = launch.dbc;
   const chain = dbc.liveStatus;
@@ -570,7 +643,7 @@ function MeteoraTokenDetailPage({ launch }) {
   const status = dbc.liveStale || dbc.liveError
     ? "Waiting for fresh chain status"
     : chain
-      ? chain.migrationProgress === 3 ? "Migrated to DAMM v2" : progress >= 100 ? "Curve complete · migration pending" : "Trading on DBC"
+      ? chain.dammV2?.verified ? "Migrated to DAMM v2" : chain.migrationStage === "bonding" ? "Trading on DBC" : "Curve complete · migration pending"
       : "Waiting for chain status";
   const explorer = (kind, value) => `https://explorer.solana.com/${kind}/${value}?cluster=${encodeURIComponent(dbc.cluster || "devnet")}`;
 
@@ -582,7 +655,7 @@ function MeteoraTokenDetailPage({ launch }) {
           <h1 style={{ marginTop: 10 }}>{launch.name}</h1>
           <div className="sub">${dbc.symbol} · Meteora DBC · {dbc.cluster}</div>
         </div>
-        <div className="actions"><span className={`status-pill ${chain?.migrationProgress === 3 ? "completed" : "progress"}`}>{status}</span></div>
+        <div className="actions"><span className={`status-pill ${chain?.dammV2?.verified ? "completed" : "progress"}`}>{status}</span></div>
       </div>
 
       {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -635,6 +708,7 @@ function MeteoraTokenDetailPage({ launch }) {
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Progress and terms are read from the selected devnet pool and config. The launch transaction is independently inspectable.</div>
         </div>
         <MeteoraTradeCard launch={launch} />
+        <MeteoraMigrationCard launch={launch} explorer={explorer} />
       </div>
     </div>
   );

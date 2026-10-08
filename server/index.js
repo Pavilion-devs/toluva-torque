@@ -19,6 +19,7 @@ import {
 import { getSolanaStatus } from "./services/solana.js";
 import {
   buildConfigTransaction,
+  buildMigrationTransaction,
   buildPoolTransaction,
   buildSwapTransaction,
   convictionTerms,
@@ -122,7 +123,7 @@ async function registryWithLivePoolState() {
           lastVerifiedDbcStatus.set(launch.dbc.pool, { status, checkedAt });
           launch.dbc = { ...launch.dbc, liveStatus: status, liveCheckedAt: checkedAt, liveStale: false, liveError: null };
           launch.bonded = status.progressPercent;
-          launch.migrationState = status.migrationProgress === 3 ? "migrated" : status.progressPercent >= 100 ? "migrating" : "bonding";
+          launch.migrationState = status.dammV2.verified ? "migrated" : status.migrationStage === "bonding" ? "bonding" : "migrating";
           launch.status = launch.migrationState;
         } catch (error) {
           const previous = lastVerifiedDbcStatus.get(launch.dbc.pool);
@@ -245,6 +246,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && pathname === "/api/meteora/swap/build") {
       sendJson(res, 200, await buildSwapTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/migration/build") {
+      sendJson(res, 200, await buildMigrationTransaction(await readBody(req)));
       return;
     }
 
