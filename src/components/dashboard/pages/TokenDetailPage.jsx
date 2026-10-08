@@ -484,30 +484,60 @@ function StatTile({ label, value, sub }) {
   );
 }
 
+function savedDbcTrade(pool) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`toluva:dbc-trade:${pool}`) || "{}");
+    return {
+      direction: saved.direction === "sell" ? "sell" : "buy",
+      amount: typeof saved.amount === "string" && saved.amount.length <= 40 ? saved.amount : "",
+      slippageBps: [50, 100, 200, 500].includes(saved.slippageBps) ? saved.slippageBps : 100,
+      reviewRequested: saved.reviewRequested === true,
+    };
+  } catch {
+    return { direction: "buy", amount: "", slippageBps: 100, reviewRequested: false };
+  }
+}
+
 function MeteoraTradeCard({ launch }) {
   const wallet = useWallet();
-  const [direction, setDirection] = React.useState("buy");
-  const [amount, setAmount] = React.useState("");
-  const [slippageBps, setSlippageBps] = React.useState(100);
+  const [saved] = React.useState(() => savedDbcTrade(launch.dbc.pool));
+  const [direction, setDirection] = React.useState(saved.direction);
+  const [amount, setAmount] = React.useState(saved.amount);
+  const [slippageBps, setSlippageBps] = React.useState(saved.slippageBps);
+  const [reviewRequested, setReviewRequested] = React.useState(saved.reviewRequested);
+  const [reviewVersion, setReviewVersion] = React.useState(0);
   const [quote, setQuote] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [signature, setSignature] = React.useState(null);
   const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
 
-  React.useEffect(() => { setQuote(null); }, [direction, amount, slippageBps, launch.dbc.pool]);
-  React.useEffect(() => { if (!canTrade) setQuote(null); }, [canTrade]);
-
-  async function review() {
-    setBusy(true); setError(null);
+  React.useEffect(() => {
     try {
-      const params = new URLSearchParams({ pool: launch.dbc.pool, direction, amount, slippageBps: String(slippageBps) });
-      const result = await getJson(`/api/meteora/swap/quote?${params}`);
-      setQuote(result.quote);
-    } catch (cause) {
-      setError(cause.message || "Unable to quote this trade.");
-    } finally { setBusy(false); }
-  }
+      sessionStorage.setItem(`toluva:dbc-trade:${launch.dbc.pool}`, JSON.stringify({ direction, amount, slippageBps, reviewRequested }));
+    } catch { /* Storage may be disabled; the trade still works for this page visit. */ }
+  }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested]);
+
+  React.useEffect(() => {
+    setQuote(null);
+    if (!reviewRequested || !canTrade || !amount) {
+      setBusy(false);
+      return undefined;
+    }
+    let active = true;
+    setBusy(true); setError(null);
+    const params = new URLSearchParams({ pool: launch.dbc.pool, direction, amount, slippageBps: String(slippageBps) });
+    getJson(`/api/meteora/swap/quote?${params}`)
+      .then((result) => { if (active) setQuote(result.quote); })
+      .catch((cause) => { if (active) setError(cause.message || "Unable to quote this trade."); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested, reviewVersion, canTrade]);
+
+  function updateDirection(value) { setDirection(value); setReviewRequested(false); }
+  function updateAmount(value) { setAmount(value); setReviewRequested(false); }
+  function updateSlippage(value) { setSlippageBps(value); setReviewRequested(false); }
+  function review() { setReviewRequested(true); setReviewVersion((version) => version + 1); }
 
   async function trade() {
     if (!quote) return;
@@ -517,6 +547,7 @@ function MeteoraTradeCard({ launch }) {
       const result = await tradeMeteoraToken({ wallet, reviewedQuote: quote });
       setSignature(result.signature);
       setQuote(null);
+      setReviewRequested(false);
       setAmount("");
       await refreshRegistry({ force: true });
     } catch (cause) {
@@ -531,14 +562,14 @@ function MeteoraTradeCard({ launch }) {
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Devnet · exact input · wallet-signed</div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        {["buy", "sell"].map((mode) => <button key={mode} type="button" className={`btn ${direction === mode ? "primary" : "ghost"}`} onClick={() => setDirection(mode)}>{mode === "buy" ? `Buy ${launch.dbc.symbol}` : `Sell ${launch.dbc.symbol}`}</button>)}
+        {["buy", "sell"].map((mode) => <button key={mode} type="button" className={`btn ${direction === mode ? "primary" : "ghost"}`} onClick={() => updateDirection(mode)}>{mode === "buy" ? `Buy ${launch.dbc.symbol}` : `Sell ${launch.dbc.symbol}`}</button>)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 150px", gap: 12 }}>
         <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Amount ({direction === "buy" ? "SOL" : launch.dbc.symbol})
-          <input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={direction === "buy" ? "0.01" : "100"} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
+          <input type="text" inputMode="decimal" value={amount} onChange={(event) => updateAmount(event.target.value)} placeholder={direction === "buy" ? "0.01" : "100"} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
         </label>
         <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Slippage
-          <select value={slippageBps} onChange={(event) => setSlippageBps(Number(event.target.value))} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
+          <select value={slippageBps} onChange={(event) => updateSlippage(Number(event.target.value))} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
             <option value={50}>0.5%</option><option value={100}>1%</option><option value={200}>2%</option><option value={500}>5%</option>
           </select>
         </label>
@@ -707,7 +738,7 @@ function MeteoraTokenDetailPage({ launch }) {
           {dbc.uri && <a href={dbc.uri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--green)" }}>Token metadata ↗</a>}
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Progress and terms are read from the selected devnet pool and config. The launch transaction is independently inspectable.</div>
         </div>
-        <MeteoraTradeCard launch={launch} />
+        <MeteoraTradeCard key={dbc.pool} launch={launch} />
         <MeteoraMigrationCard launch={launch} explorer={explorer} />
       </div>
     </div>
