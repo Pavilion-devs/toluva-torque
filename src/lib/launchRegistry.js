@@ -188,11 +188,11 @@ export function getRegistryAnalytics(sourceRegistry = fallbackRegistry) {
       { label: "Active campaigns", value: String(activeCampaigns.length), unit: "live", delta: "registry records", positive: true },
     ],
     topLaunches: [...sourceLaunches]
-      .sort((a, b) => Number(b.buyers || 0) - Number(a.buyers || 0) || Number(b.bonded || 0) - Number(a.bonded || 0))
+      .sort((a, b) => Number(b.dbc?.activity?.trackedBuyers ?? b.buyers ?? 0) - Number(a.dbc?.activity?.trackedBuyers ?? a.buyers ?? 0) || Number(b.bonded || 0) - Number(a.bonded || 0))
       .slice(0, 5)
       .map((launch) => ({
         sym: launch.sym,
-        metric: `${launch.buyers || 0} buyers · ${launch.status}`,
+        metric: launch.dbc ? `${launch.dbc.activity?.trackedBuyers ?? "—"} tracked buyers · ${launch.status}` : `${launch.buyers || 0} buyers · ${launch.status}`,
         pct: Math.max(0, Math.min(100, Number(launch.bonded || 0))),
       })),
     templateConversion: sourceCampaigns.map((campaign) => ({

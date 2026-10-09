@@ -232,12 +232,18 @@ async function writeFileRegistry(nextRegistry) {
   return nextRegistry;
 }
 
+let fileWriteQueue = Promise.resolve();
+
 async function updateFileRegistry(updater) {
-  const current = await readFileRegistry();
-  const draft = clone(current);
-  const result = await updater(draft);
-  await writeFileRegistry(draft);
-  return result ?? draft;
+  const write = fileWriteQueue.then(async () => {
+    const current = await readFileRegistry();
+    const draft = clone(current);
+    const result = await updater(draft);
+    await writeFileRegistry(draft);
+    return result ?? draft;
+  });
+  fileWriteQueue = write.catch(() => {});
+  return write;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -322,6 +328,11 @@ export async function createCampaign(input) {
 }
 
 export async function recordEvent(input) {
+  if (String(input.type || input.eventType || "").startsWith("dbc_") || String(input.id || "").startsWith("dbc_swap_")) {
+    const error = new Error("DBC activity is recorded only by the on-chain transaction verifier.");
+    error.status = 400;
+    throw error;
+  }
   if (supabase) {
     const row = normalizeEventInsert(input);
     const { data, error } = await supabase.from("event_receipts").insert(row).select().single();
@@ -364,6 +375,77 @@ export async function recordEvent(input) {
     }
     return event;
   });
+}
+
+const DBC_ACTIVITY_TYPES = ["dbc_buy_verified", "dbc_sell_verified"];
+const MAX_ACTIVITY_EVENTS = 500;
+
+export async function recordVerifiedDbcTrade(launch, trade) {
+  const row = normalizeEventInsert({
+    id: `dbc_swap_${trade.signature}`,
+    type: trade.direction === "buy" ? "dbc_buy_verified" : "dbc_sell_verified",
+    token: launch.sym,
+    wallet: trade.wallet,
+    payload: trade,
+    status: "finalized",
+    createdAt: trade.blockTime ? new Date(trade.blockTime * 1000).toISOString() : new Date().toISOString(),
+  });
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts").upsert(row, { onConflict: "id", ignoreDuplicates: true }).select().maybeSingle();
+    if (error) dbErr("verified DBC trade insert", error);
+    if (data) return eventFromRow(data);
+    const existing = await supabase.from("event_receipts").select("*").eq("id", row.id).single();
+    if (existing.error) dbErr("verified DBC trade lookup", existing.error);
+    return eventFromRow(existing.data);
+  }
+  return updateFileRegistry((registry) => {
+    registry.eventReceipts = registry.eventReceipts || [];
+    const existing = registry.eventReceipts.find((event) => event.id === row.id);
+    if (existing) return existing;
+    const event = eventFromRow(row);
+    registry.eventReceipts.unshift(event);
+    return event;
+  });
+}
+
+export async function getVerifiedDbcActivity(launch) {
+  let events;
+  let complete;
+  if (supabase) {
+    const response = await supabase.from("event_receipts")
+      .select("*")
+      .eq("token", launch.sym)
+      .in("type", DBC_ACTIVITY_TYPES)
+      .order("created_at", { ascending: false })
+      .limit(MAX_ACTIVITY_EVENTS + 1);
+    if (response.error) dbErr("verified DBC activity select", response.error);
+    complete = response.data.length <= MAX_ACTIVITY_EVENTS;
+    events = response.data.slice(0, MAX_ACTIVITY_EVENTS).map(eventFromRow);
+  } else {
+    const registry = await readFileRegistry();
+    const matching = (registry.eventReceipts || [])
+      .filter((event) => event.token === launch.sym && DBC_ACTIVITY_TYPES.includes(event.type))
+      .sort((a, b) => Number(b.payload?.slot || 0) - Number(a.payload?.slot || 0));
+    complete = matching.length <= MAX_ACTIVITY_EVENTS;
+    events = matching.slice(0, MAX_ACTIVITY_EVENTS);
+  }
+  const buys = events.filter((event) => event.type === "dbc_buy_verified");
+  return {
+    source: "finalized_signatures_submitted_to_toluva",
+    complete,
+    trackedBuys: buys.length,
+    trackedSells: events.length - buys.length,
+    trackedBuyers: new Set(buys.map((event) => event.wallet)).size,
+    recent: events.slice(0, 10).map((event) => ({
+      signature: event.payload?.signature,
+      direction: event.type === "dbc_buy_verified" ? "buy" : "sell",
+      wallet: event.wallet,
+      baseAmount: event.payload?.baseAmount,
+      quoteLamports: event.payload?.quoteLamports,
+      slot: event.payload?.slot,
+      blockTime: event.payload?.blockTime,
+    })),
+  };
 }
 
 export async function hasBuyEventForWallet({ token, wallet }) {

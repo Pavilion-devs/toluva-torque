@@ -498,6 +498,13 @@ function savedDbcTrade(pool) {
   }
 }
 
+function pendingDbcProofs(pool) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`toluva:dbc-proof:${pool}`) || "[]");
+    return Array.isArray(saved) ? saved.filter((signature) => typeof signature === "string" && signature.length <= 90) : [];
+  } catch { return []; }
+}
+
 function MeteoraTradeCard({ launch }) {
   const wallet = useWallet();
   const [saved] = React.useState(() => savedDbcTrade(launch.dbc.pool));
@@ -510,6 +517,8 @@ function MeteoraTradeCard({ launch }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [signature, setSignature] = React.useState(null);
+  const [pendingProofs, setPendingProofs] = React.useState(() => pendingDbcProofs(launch.dbc.pool));
+  const [proofError, setProofError] = React.useState(null);
   const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
 
   React.useEffect(() => {
@@ -517,6 +526,33 @@ function MeteoraTradeCard({ launch }) {
       sessionStorage.setItem(`toluva:dbc-trade:${launch.dbc.pool}`, JSON.stringify({ direction, amount, slippageBps, reviewRequested }));
     } catch { /* Storage may be disabled; the trade still works for this page visit. */ }
   }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested]);
+
+  React.useEffect(() => {
+    try { localStorage.setItem(`toluva:dbc-proof:${launch.dbc.pool}`, JSON.stringify(pendingProofs)); }
+    catch { /* The trade remains confirmed even when browser storage is disabled. */ }
+    if (!pendingProofs.length) return undefined;
+    let active = true;
+    let processing = false;
+    async function verifyPending() {
+      if (processing || !active) return;
+      processing = true;
+      for (const proof of pendingProofs) {
+        try {
+          await postJson("/api/meteora/trades/verify", { pool: launch.dbc.pool, signature: proof });
+          if (!active) break;
+          setPendingProofs((current) => current.filter((item) => item !== proof));
+          setProofError(null);
+          await refreshRegistry({ force: true });
+        } catch (cause) {
+          if (active) setProofError(cause.message || "Activity verification is pending.");
+        }
+      }
+      processing = false;
+    }
+    verifyPending();
+    const timer = window.setInterval(verifyPending, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [launch.dbc.pool, pendingProofs]);
 
   React.useEffect(() => {
     setQuote(null);
@@ -546,6 +582,7 @@ function MeteoraTradeCard({ launch }) {
       const { tradeMeteoraToken } = await import("../../../lib/meteoraDbc");
       const result = await tradeMeteoraToken({ wallet, reviewedQuote: quote });
       setSignature(result.signature);
+      setPendingProofs((current) => current.includes(result.signature) ? current : [...current, result.signature]);
       setQuote(null);
       setReviewRequested(false);
       setAmount("");
@@ -583,11 +620,37 @@ function MeteoraTradeCard({ launch }) {
       {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
       {wallet.error && <div style={{ color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
       {signature && <a href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed trade {shortAddress(signature)} ↗</a>}
+      {pendingProofs.length > 0 && <div style={{ color: "var(--ink-dim)", fontSize: 12 }}>Checking {pendingProofs.length} confirmed trade{pendingProofs.length === 1 ? "" : "s"} for finalized activity. {proofError || ""}</div>}
       <div style={{ display: "flex", gap: 10 }}>
         <button type="button" className="btn ghost" disabled={busy || !canTrade || !amount} onClick={review}>{busy && !quote ? "Quoting…" : "Review quote"}</button>
         {quote && <button type="button" className="btn primary" disabled={busy || !wallet.connected || !canTrade} onClick={trade}>{busy ? "Signing…" : "Sign trade"}</button>}
         {!wallet.connected && <button type="button" className="btn ghost" onClick={wallet.connect}>Connect wallet</button>}
       </div>
+    </div>
+  );
+}
+
+function DbcActivityCard({ launch, explorer }) {
+  const activity = launch.dbc.activity;
+  return (
+    <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Verified DBC activity</h3>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Finalized swaps submitted to Toluva and checked against this pool on chain.</div>
+      </div>
+      {activity?.error ? <div style={{ color: "#9f1239", fontSize: 12 }}>{activity.error}</div> : <>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <StatTile label="Tracked buyers" value={`${activity?.trackedBuyers ?? 0}${activity?.complete === false ? "+" : ""}`} />
+          <StatTile label="Verified buys" value={`${activity?.trackedBuys ?? 0}${activity?.complete === false ? "+" : ""}`} />
+          <StatTile label="Verified sells" value={`${activity?.trackedSells ?? 0}${activity?.complete === false ? "+" : ""}`} />
+        </div>
+        {(activity?.recent || []).length ? <div style={{ display: "grid", gap: 8 }}>
+          {activity.recent.map((trade) => <div key={trade.signature} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 12, borderTop: "1px solid var(--line)", paddingTop: 9 }}>
+            <span><strong style={{ textTransform: "capitalize" }}>{trade.direction}</strong> · {shortAddress(trade.wallet)} · {(Number(trade.quoteLamports) / LAMPORTS_PER_SOL).toLocaleString(undefined, { maximumFractionDigits: 6 })} SOL</span>
+            <a href={explorer("tx", trade.signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>{shortAddress(trade.signature)} ↗</a>
+          </div>)}
+        </div> : <div style={{ color: "var(--muted)", fontSize: 12 }}>No finalized swaps have been tracked yet.</div>}
+      </>}
     </div>
   );
 }
@@ -741,6 +804,7 @@ function MeteoraTokenDetailPage({ launch }) {
         <MeteoraTradeCard key={dbc.pool} launch={launch} />
         <MeteoraMigrationCard launch={launch} explorer={explorer} />
       </div>
+      <DbcActivityCard launch={launch} explorer={explorer} />
     </div>
   );
 }

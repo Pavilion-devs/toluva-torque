@@ -5,9 +5,11 @@ import {
   createCampaign,
   createLaunch,
   getCampaignResults,
+  getVerifiedDbcActivity,
   hasBuyEventForWallet,
   readRegistry,
   recordEvent,
+  recordVerifiedDbcTrade,
 } from "./registry-store.js";
 import {
   buildBuyTransaction,
@@ -38,6 +40,7 @@ import {
   readHostedTokenMetadata,
   readLocalMetadataAsset,
 } from "./services/meteora-metadata.js";
+import { verifyDbcSwapSignature } from "./services/meteora-activity.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
@@ -124,6 +127,11 @@ async function registryWithLivePoolState() {
       const poolId = launch.raydium?.poolId;
 
       if (launch.dbc?.pool) {
+        try {
+          launch.dbc.activity = await getVerifiedDbcActivity(launch);
+        } catch (error) {
+          launch.dbc.activity = { error: error.message || "Verified activity is unavailable." };
+        }
         try {
           const status = await getPoolStatus(launch.dbc.pool);
           const checkedAt = new Date().toISOString();
@@ -272,6 +280,21 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/meteora/pool") {
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       sendJson(res, 200, { pool: await getPoolStatus(url.searchParams.get("address")) });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/trades/verify") {
+      const body = await readBody(req);
+      const registry = await readRegistry();
+      const launch = (registry.launches || []).find((item) => item.dbc?.pool === body.pool && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC pool is not registered on Toluva for the current network.");
+        error.status = 404;
+        throw error;
+      }
+      const trade = await verifyDbcSwapSignature({ signature: body.signature, pool: launch.dbc.pool, mint: launch.dbc.mint });
+      const event = await recordVerifiedDbcTrade(launch, trade);
+      sendJson(res, 200, { trade, eventId: event.id });
       return;
     }
 

@@ -56,7 +56,8 @@ This records the first Toluva-owned Meteora DBC pilot launched through the ordin
 
 ## Next evidence
 
+- Both pilot buy signatures independently pass Toluva's finalized DBC swap verifier. It checks the DBC `swap2` instruction, exact pool and mint, signer, and opposing wallet/pool token balance changes. The public page now reports **2 verified buys by 1 tracked buyer**, each linked to its transaction. Re-submitting the same signature leaves the event count at two. The devnet RPC returned the first buy by direct signature lookup while omitting it from that pool's address-history listing, so Toluva records verified submitted signatures and does not present its count as a complete chain index.
 - Wallet-signed DBC sell on a still-active curve: pending. This graduated pool has closed DBC trading, so that check requires another ordinary launch or an independent active pool.
-- Independent creator reproduction, general-purpose metadata hosting, verified campaign eligibility and funded reward claim: pending.
+- Independent creator reproduction, general-purpose metadata hosting, published campaign eligibility and funded reward claim: pending.
 
 The first pool build attempt exposed a schema mapping error: the SDK builder accepts nested `migratedPoolFee`, while decoded on-chain `PoolConfig` stores `migratedPoolFeeBps` at the top level. The confirmed config was unaffected. The reader now uses the on-chain field, and an unsigned pool transaction using this config passed devnet simulation before the successful wallet-signed launch.

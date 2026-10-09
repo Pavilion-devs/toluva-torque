@@ -606,7 +606,7 @@ function GradientTile({ symbol }) {
 function LaunchCard({ launch }) {
   const statusInfo = statusMap[launch.status] || { label: launch.status, pill: "pending" };
   const progress = Math.max(0, Math.min(100, Number(launch.bonded) || 0));
-  const buyers = Number(launch.buyers) || 0;
+  const buyers = launch.dbc ? launch.dbc.activity?.trackedBuyers : Number(launch.buyers) || 0;
   const ticker = launch.dbc?.symbol || launch.sym;
 
   function open() {
@@ -702,7 +702,9 @@ function LaunchCard({ launch }) {
               {progress.toFixed(progress < 10 ? 2 : 1)}%
             </span>
             <span style={{ color: "var(--muted)", fontWeight: 500 }}>
-              {buyers} buyer{buyers === 1 ? "" : "s"}
+              {launch.dbc
+                ? buyers === undefined ? "Activity unavailable" : `${buyers}${launch.dbc.activity?.complete === false ? "+" : ""} tracked buyer${buyers === 1 ? "" : "s"}`
+                : `${buyers} buyer${buyers === 1 ? "" : "s"}`}
             </span>
           </div>
         </div>
