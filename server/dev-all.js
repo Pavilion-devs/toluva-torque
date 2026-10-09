@@ -33,6 +33,6 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 run("api", "node", ["server/index.js"]);
-run("web", "npm", ["run", "dev:web"], {
+run("web", "npm", ["run", "dev:web", "--", "--host", "127.0.0.1"], {
   VITE_TOLUVA_API_URL: process.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787",
 });
