@@ -76,6 +76,11 @@ export const config = {
     url: firstSet(process.env.SUPABASE_URL),
     serviceRoleKey: firstSet(process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
+  metadata: {
+    bucket: firstSet(process.env.TOLUVA_METADATA_BUCKET),
+    directory: firstSet(process.env.TOLUVA_METADATA_DIR),
+    publicBaseUrl: firstSet(process.env.TOLUVA_METADATA_PUBLIC_BASE_URL),
+  },
 };
 
 const raydiumCluster = normalizedCluster(firstSet(process.env.RAYDIUM_CLUSTER, config.solana.cluster));

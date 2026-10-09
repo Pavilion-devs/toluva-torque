@@ -31,6 +31,13 @@ import {
 } from "./services/meteora-dbc.js";
 import { torqueEventSchemas } from "./services/torque-event-catalog.js";
 import { emitTorqueEvent } from "./services/torque-client.js";
+import {
+  createMetadataChallenge,
+  metadataHostingStatus,
+  publishTokenMetadata,
+  readHostedTokenMetadata,
+  readLocalMetadataAsset,
+} from "./services/meteora-metadata.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
@@ -60,14 +67,14 @@ function sendError(res, error) {
   });
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = 64 * 1024) {
   const chunks = [];
   let bytes = 0;
 
   for await (const chunk of req) {
     bytes += chunk.length;
-    if (bytes > 64 * 1024) {
-      const error = new Error("Request body must be smaller than 64 KB.");
+    if (bytes > maxBytes) {
+      const error = new Error(`Request body must be smaller than ${Math.floor(maxBytes / 1024)} KB.`);
       error.status = 413;
       throw error;
     }
@@ -184,6 +191,21 @@ const server = http.createServer(async (req, res) => {
   const pathname = routePath(req);
 
   try {
+    const metadataAsset = pathname.match(/^\/metadata\/(images\/[a-f0-9]{64}\.jpg|tokens\/[a-f0-9]{64}\.json)$/);
+    if (req.method === "GET" && metadataAsset) {
+      const asset = await readLocalMetadataAsset(metadataAsset[1]);
+      if (!asset) sendJson(res, 404, { error: "Metadata asset not found." });
+      else {
+        res.writeHead(200, {
+          "Content-Type": asset.contentType,
+          "Content-Length": asset.bytes.length,
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "Access-Control-Allow-Origin": allowedOrigin,
+        });
+        res.end(asset.bytes);
+      }
+      return;
+    }
     const legacyWrite = req.method === "POST" && (
       pathname === "/api/launches"
       || pathname === "/api/campaigns"
@@ -222,6 +244,21 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/meteora/terms") {
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       sendJson(res, 200, { terms: convictionTerms({ migrationThresholdSol: url.searchParams.get("migrationThresholdSol") || undefined }) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/metadata/status") {
+      sendJson(res, 200, { hosting: metadataHostingStatus() });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/metadata/challenge") {
+      sendJson(res, 200, createMetadataChallenge(await readBody(req, 512 * 1024)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/metadata/publish") {
+      sendJson(res, 201, await publishTokenMetadata(await readBody(req, 512 * 1024)));
       return;
     }
 
@@ -279,11 +316,17 @@ const server = http.createServer(async (req, res) => {
         error.status = 400;
         throw error;
       }
+      const hostedMetadata = await readHostedTokenMetadata(verified.metadata.uri);
+      if (hostedMetadata && (hostedMetadata.name !== name || hostedMetadata.symbol !== symbol)) {
+        const error = new Error("Hosted token metadata does not match the confirmed on-chain name and symbol.");
+        error.status = 400;
+        throw error;
+      }
       const launch = await createLaunch({
         sym: `${symbol}-${verified.mint}`.toUpperCase(),
         name,
-        description: "",
-        image: null,
+        description: hostedMetadata?.description || "",
+        image: hostedMetadata?.image || null,
         status: "bonding",
         pool: verified.pool,
         age: "now",

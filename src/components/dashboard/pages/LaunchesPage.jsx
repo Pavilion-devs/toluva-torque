@@ -141,13 +141,14 @@ function FilterDropdown({ filters, active, onChange }) {
 
 // ─── image dropzone ───────────────────────────────────────────────────────────
 
-function ImageDropzone({ value, onChange, error }) {
+function ImageDropzone({ value, onChange, error, disabled = false }) {
   const inputRef = React.useRef(null);
   const [hover, setHover] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [localError, setLocalError] = React.useState(null);
 
   async function handleFile(file) {
+    if (disabled) return;
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setLocalError("Please upload an image file.");
@@ -161,6 +162,9 @@ function ImageDropzone({ value, onChange, error }) {
     setLocalError(null);
     try {
       const dataUrl = await fileToCompressedDataUrl(file, 512, 0.85);
+      if (Math.floor((dataUrl.length - "data:image/jpeg;base64,".length) * 3 / 4) > 256 * 1024) {
+        throw new Error("Processed image is over 256 KB. Choose a smaller image.");
+      }
       onChange(dataUrl);
     } catch (e) {
       setLocalError(e instanceof Error ? e.message : "Could not process image.");
@@ -173,19 +177,19 @@ function ImageDropzone({ value, onChange, error }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-dim)" }}>Token image</span>
       <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setHover(true); }}
+        onClick={() => { if (!disabled) inputRef.current?.click(); }}
+        onDragOver={(e) => { e.preventDefault(); if (!disabled) setHover(true); }}
         onDragLeave={() => setHover(false)}
-        onDrop={(e) => { e.preventDefault(); setHover(false); handleFile(e.dataTransfer.files?.[0]); }}
+        onDrop={(e) => { e.preventDefault(); setHover(false); if (!disabled) handleFile(e.dataTransfer.files?.[0]); }}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+        onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) inputRef.current?.click(); }}
         style={{
           width: "100%", aspectRatio: "1 / 1",
           borderRadius: 16, overflow: "hidden", position: "relative",
           border: `2px dashed ${hover ? "var(--green)" : value ? "transparent" : "var(--line)"}`,
           background: value ? "transparent" : hover ? "var(--green-pale)" : "var(--card-muted)",
-          cursor: "pointer", display: "grid", placeItems: "center",
+          cursor: disabled ? "default" : "pointer", display: "grid", placeItems: "center",
           transition: "border-color 160ms, background 160ms",
         }}
       >
@@ -194,7 +198,8 @@ function ImageDropzone({ value, onChange, error }) {
             <img src={value} alt="Token preview" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onChange(null); }}
+              onClick={(e) => { e.stopPropagation(); if (!disabled) onChange(null); }}
+              disabled={disabled}
               style={{
                 position: "absolute", top: 8, right: 8,
                 width: 28, height: 28, borderRadius: "50%",
@@ -236,7 +241,8 @@ function ImageDropzone({ value, onChange, error }) {
           ref={inputRef}
           type="file"
           accept="image/*"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          disabled={disabled}
+          onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }}
           style={{ display: "none" }}
         />
       </div>
@@ -280,27 +286,70 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
   const [form, setForm] = React.useState(() => ({
     name: "",
     symbol: "",
+    description: "",
+    imageDataUrl: null,
     uri: "",
     migrationThresholdSol: "5",
   }));
   const [terms, setTerms] = React.useState(null);
+  const [hosting, setHosting] = React.useState(null);
+  const [metadataMode, setMetadataMode] = React.useState("hosted");
   const [pending, setPending] = React.useState(null);
   const [state, setState] = React.useState({ status: "idle", error: null, result: null, stage: null });
 
-  const update = (field) => (e) => setForm((c) => ({ ...c, [field]: e.target.value }));
+  const update = (field) => (e) => updateDetail(field, e.target.value);
   const draftKey = wallet.address ? `toluva:dbc-draft:${wallet.address}` : null;
+  const activePending = pending?.draftKey === draftKey ? pending : null;
+
+  function updateDetail(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      uri: ["name", "symbol", "description", "imageDataUrl"].includes(field)
+        && activePending?.hostedMetadata?.uri === current.uri ? "" : current.uri,
+    }));
+    if (activePending?.hostedMetadata && ["name", "symbol", "description", "imageDataUrl"].includes(field)) {
+      setPending((current) => ({ ...current, hostedMetadata: null }));
+    }
+  }
+
+  function switchMetadataMode(mode) {
+    if (mode === metadataMode) return;
+    setMetadataMode(mode);
+    setForm((current) => ({ ...current, uri: "" }));
+    if (activePending?.hostedMetadata) setPending((current) => ({ ...current, hostedMetadata: null }));
+  }
 
   React.useEffect(() => {
     setPending(null);
     if (!draftKey) return;
     try {
       const saved = JSON.parse(window.localStorage.getItem(draftKey) || "null");
-      if (saved?.form && (saved?.config || saved?.proof)) {
-        setForm(saved.form);
-        setPending(saved);
+      if (saved?.form && (saved?.config || saved?.proof || saved?.hostedMetadata)) {
+        setForm({ description: "", imageDataUrl: null, ...saved.form });
+        setPending({ ...saved, draftKey });
+        setMetadataMode(saved.metadataMode === "external" ? "external" : "hosted");
       }
     } catch { /* Ignore malformed local draft. */ }
   }, [draftKey]);
+
+  React.useEffect(() => {
+    let live = true;
+    getJson("/api/meteora/metadata/status")
+      .then((data) => {
+        if (!live) return;
+        setHosting(data.hosting);
+        if (!data.hosting?.available) setMetadataMode("external");
+      })
+      .catch(() => { if (live) { setHosting({ available: false }); setMetadataMode("external"); } });
+    return () => { live = false; };
+  }, []);
+
+  React.useEffect(() => {
+    if (!draftKey || !pending || pending.draftKey !== draftKey) return;
+    try { window.localStorage.setItem(draftKey, JSON.stringify({ ...pending, form, metadataMode })); }
+    catch { /* The live form still works if browser storage is unavailable. */ }
+  }, [draftKey, pending, form, metadataMode]);
 
   React.useEffect(() => {
     let live = true;
@@ -312,8 +361,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
   }, [form.migrationThresholdSol]);
 
   function savePending(next) {
-    setPending(next);
-    if (draftKey) window.localStorage.setItem(draftKey, JSON.stringify(next));
+    setPending({ ...next, draftKey });
   }
 
   async function submit(e) {
@@ -322,24 +370,45 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
       setState({ status: "error", error: "Enter a token name and a 2–10 character letter/number symbol.", result: null });
       return;
     }
-    if (!/^https:\/\//.test(form.uri.trim())) {
+    if (metadataMode === "external" && !/^https:\/\//.test(form.uri.trim())) {
       setState({ status: "error", error: "Enter a publicly hosted HTTPS token metadata JSON URI.", result: null });
+      return;
+    }
+    if (metadataMode === "hosted" && !hosting?.available && !activePending?.proof) {
+      setState({ status: "error", error: "Toluva metadata hosting is unavailable. Use an existing public HTTPS metadata URI.", result: null });
       return;
     }
     setState({ status: "submitting", error: null, result: null, stage: "Preparing launch…" });
     try {
-      const { launchMeteoraToken, registerConfirmedMeteoraLaunch } = await import("../../../lib/meteoraDbc");
-      const result = pending?.proof
-        ? { ...(await registerConfirmedMeteoraLaunch(pending.proof)), ...pending.proof }
+      const { launchMeteoraToken, publishMeteoraMetadata, registerConfirmedMeteoraLaunch } = await import("../../../lib/meteoraDbc");
+      let launchForm = form;
+      let hostedMetadata = activePending?.hostedMetadata || null;
+      if (!activePending?.proof && metadataMode === "hosted" && (!hostedMetadata || hostedMetadata.uri !== form.uri)) {
+        const published = await publishMeteoraMetadata({
+          wallet,
+          name: form.name,
+          symbol: form.symbol,
+          description: form.description,
+          imageDataUrl: form.imageDataUrl,
+          onStage: (stage) => setState((current) => ({ ...current, stage })),
+        });
+        launchForm = { ...form, uri: published.uri };
+        hostedMetadata = { uri: published.uri, image: published.image };
+        setForm(launchForm);
+        savePending({ ...activePending, form: launchForm, metadataMode, hostedMetadata });
+      }
+      const result = activePending?.proof
+        ? { ...(await registerConfirmedMeteoraLaunch(activePending.proof)), ...activePending.proof }
         : await launchMeteoraToken({
           wallet,
-          launch: form,
-          configAddress: pending?.config?.address,
+          launch: launchForm,
+          configAddress: activePending?.config?.address,
           onStage: (stage) => setState((current) => ({ ...current, stage })),
-          onConfigConfirmed: (created) => savePending({ form, config: created }),
-          onPoolConfirmed: (proof) => savePending({ form, config: { address: proof.config }, proof }),
+          onConfigConfirmed: (created) => savePending({ form: launchForm, metadataMode, hostedMetadata, config: created }),
+          onPoolConfirmed: (proof) => savePending({ form: launchForm, metadataMode, hostedMetadata, config: { address: proof.config }, proof }),
         });
       if (draftKey) window.localStorage.removeItem(draftKey);
+      setPending(null);
       await refreshRegistry({ force: true });
       setState({ status: "submitted", error: null, result, stage: null });
       onLaunched?.(result);
@@ -353,7 +422,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
     }
   }
 
-  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected" || !terms;
+  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected" || !terms || !hosting;
 
   return (
     <form className="card" onSubmit={submit} style={{ padding: 28 }}>
@@ -388,16 +457,38 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
       <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Field label="Token name">
-            <input value={form.name} onChange={update("name")} placeholder="Your token name" style={inputStyle} />
+            <input value={form.name} onChange={update("name")} maxLength={32} disabled={state.status === "submitting"} placeholder="Your token name" style={inputStyle} />
           </Field>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Symbol" hint="2–10 letters or numbers">
-              <input value={form.symbol} onChange={update("symbol")} maxLength={10} style={{ ...monoInputStyle, textTransform: "uppercase" }} />
-            </Field>
-            <Field label="Metadata URI" hint="Public HTTPS token JSON">
-              <input value={form.uri} onChange={update("uri")} placeholder="https://…/token.json" style={monoInputStyle} />
-            </Field>
+          <Field label="Symbol" hint="2–10 letters or numbers">
+            <input value={form.symbol} onChange={update("symbol")} maxLength={10} disabled={state.status === "submitting"} style={{ ...monoInputStyle, textTransform: "uppercase" }} />
+          </Field>
+
+          <div style={{ display: "grid", gap: 10, padding: 14, border: "1px solid var(--line)", borderRadius: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>Token metadata</div>
+            {hosting?.available ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className={`btn ${metadataMode === "hosted" ? "primary" : "ghost"}`} disabled={state.status === "submitting"} onClick={() => switchMetadataMode("hosted")}>Publish with Toluva</button>
+                <button type="button" className={`btn ${metadataMode === "external" ? "primary" : "ghost"}`} disabled={state.status === "submitting"} onClick={() => switchMetadataMode("external")}>Use existing URI</button>
+              </div>
+            ) : <div style={{ fontSize: 12, color: "var(--muted)" }}>{hosting ? hosting.message || "Supply a public HTTPS token JSON URI." : "Checking metadata hosting…"}</div>}
+
+            {metadataMode === "hosted" && hosting?.available ? (
+              <div className="dbc-metadata-grid">
+                <ImageDropzone value={form.imageDataUrl} onChange={(value) => updateDetail("imageDataUrl", value)} disabled={state.status === "submitting"} />
+                <div style={{ display: "grid", gap: 10 }}>
+                  <Field label="Description" hint="Up to 280 characters; published with the token details">
+                    <textarea value={form.description} onChange={update("description")} maxLength={280} rows={4} disabled={state.status === "submitting"} placeholder="What is this token for?" style={{ ...inputStyle, resize: "vertical" }} />
+                  </Field>
+                  {form.uri && activePending?.hostedMetadata?.uri === form.uri && <a href={form.uri} target="_blank" rel="noreferrer" style={{ fontSize: 11, overflowWrap: "anywhere", color: "var(--green)" }}>Published metadata ↗</a>}
+                  <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Your wallet will approve public metadata first, then the DBC config and token launch. Published details are content-addressed and cannot be edited at the same URL.</div>
+                </div>
+              </div>
+            ) : (
+              <Field label="Metadata URI" hint="Public HTTPS token JSON containing your token name and symbol">
+                <input value={form.uri} onChange={update("uri")} disabled={state.status === "submitting"} placeholder="https://…/token.json" style={monoInputStyle} />
+              </Field>
+            )}
           </div>
 
         </div>
@@ -405,7 +496,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
 
       <div style={{ marginTop: 18, padding: 16, borderRadius: 14, border: "1px solid var(--line)", background: "var(--card-muted)", display: "grid", gap: 12 }}>
         <Field label="Graduation target (SOL)" hint="Quote raised before DAMM v2 migration; devnet range 1–100 SOL">
-          <input type="number" min="1" max="100" step="0.1" value={form.migrationThresholdSol} onChange={update("migrationThresholdSol")} disabled={Boolean(pending?.config)} style={monoInputStyle} />
+          <input type="number" min="1" max="100" step="0.1" value={form.migrationThresholdSol} onChange={update("migrationThresholdSol")} disabled={state.status === "submitting" || Boolean(activePending?.config)} style={monoInputStyle} />
         </Field>
         {terms ? (
           <div style={{ fontSize: 12, lineHeight: 1.7, color: "var(--ink-dim)" }}>
@@ -451,7 +542,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
           className="btn primary"
           style={disabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
         >
-          {state.status === "submitting" ? "Submitting…" : pending?.proof ? "Finish registration" : pending?.config ? "Resume token launch" : "Create config & launch"}
+          {state.status === "submitting" ? "Submitting…" : activePending?.proof ? "Finish registration" : activePending?.config ? "Resume token launch" : metadataMode === "hosted" && !form.uri ? "Publish details & launch" : "Create config & launch"}
         </button>
       </div>
     </form>

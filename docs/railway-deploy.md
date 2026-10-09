@@ -26,9 +26,12 @@ SOLANA_RPC_URL=https://api.devnet.solana.com
 TOLUVA_ALLOWED_ORIGIN=*
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
+TOLUVA_METADATA_BUCKET=
 ```
 
 Do not set `PORT` — Railway injects it automatically.
+
+For Toluva-hosted token metadata, create a public Supabase Storage bucket and set `TOLUVA_METADATA_BUCKET`. The service role key stays on Railway. See [metadata-hosting.md](metadata-hosting.md). Do not use Railway's ephemeral filesystem for on-chain metadata URIs; a persistent volume plus a public HTTPS API domain is required for the local-file backend.
 
 ### 4. Deploy
 

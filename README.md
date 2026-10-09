@@ -11,7 +11,8 @@ This repository began as Toluva's Raydium LaunchLab + Torque hackathon project. 
 - Pool registration checks a confirmed DBC pool, its derived address, creator and mint signatures, and the specific pool creation instruction. Name, symbol and URI are decoded from that instruction.
 - The public launch page reads live DBC progress and on-chain config terms. The creator can resume after a confirmed config or retry registration after a confirmed pool.
 - Exact-input DBC quote and buy/sell transaction builders are wired to a wallet-signed trade card with slippage and minimum-received review. Two wallet-signed buys completed the first pilot curve; a sell has not yet been signed.
-- The creator-signed config, token pool, buys and DAMM v2 migration are [confirmed on chain](docs/meteora-proof.md). The live page reads the graduated pool, creator position NFT, fee and permanent liquidity lock. General-purpose metadata hosting, independent creator reproduction, verified campaigns and rewards remain in the [plan](plan.md).
+- The creator-signed config, token pool, buys and DAMM v2 migration are [confirmed on chain](docs/meteora-proof.md). The live page reads the graduated pool, creator position NFT, fee and permanent liquidity lock. Independent creator reproduction, verified campaigns and rewards remain in the [plan](plan.md).
+- The launch form can publish wallet-approved, content-addressed metadata and artwork when [public storage is configured](docs/metadata-hosting.md). The API checks public readability before giving the URI to the launch flow. Without storage configuration, creators can still supply an existing HTTPS metadata URI. This hosting path has passed automated and isolated API checks but has not yet been used for an on-chain launch.
 
 ## Run locally
 
@@ -26,13 +27,13 @@ The frontend runs on port 5173 and the API on port 8787. Run `npm test` for the 
 
 For a public deployment, configure `VITE_TOLUVA_API_URL` with a reachable API origin. The frontend shows an API error if it is missing. Configure `SOLANA_CLUSTER=devnet` and `SOLANA_RPC_URL` for the API; set `VITE_SOLANA_RPC_URL` to an RPC for the same cluster. The launch flow currently rejects non-devnet pool/config creation. Supabase remains optional locally; a persistent public registry needs the updated [schema](scripts/supabase-schema.sql) with the `dbc` column.
 
-Creators need a Solana browser wallet, devnet SOL for account rent and fees, and a public HTTPS token metadata JSON URI. Toluva does not hold creator keys or silently substitute a demo wallet.
+Creators need a Solana browser wallet and devnet SOL for account rent and fees. They can use Toluva-hosted metadata when storage is configured, or supply a public HTTPS token JSON URI. Toluva does not hold creator keys or silently substitute a demo wallet.
 
 ## Next integration gates
 
 1. Submit and inspect a wallet-signed DBC sell through the normal token page.
-2. Add general-purpose metadata hosting so creators do not need to supply their own URI.
-3. Reproduce a launch with an independent creator wallet.
+2. Configure durable public metadata storage and launch through that path with an independent creator wallet.
+3. Confirm artwork and description render on the public launch page.
 4. Verify participation from confirmed transactions before enabling campaign rewards.
 
 See [plan.md](plan.md) for exit criteria and evidence standards.

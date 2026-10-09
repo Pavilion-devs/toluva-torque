@@ -9,6 +9,52 @@ function transactionFromBase64(value) {
   return Transaction.from(Uint8Array.from(atob(value), (character) => character.charCodeAt(0)));
 }
 
+export async function publishMeteoraMetadata({ wallet, name, symbol, description, imageDataUrl, onStage }) {
+  if (!wallet?.address || wallet.source !== "injected") throw new Error("Connect a Solana wallet to publish token details.");
+  const provider = getInjectedWalletProvider();
+  if (!provider?.signMessage || provider.publicKey?.toString() !== wallet.address) {
+    throw new Error("This wallet cannot approve token metadata. Reconnect a wallet with message signing support.");
+  }
+  const payload = {
+    name: name.trim(), symbol: symbol.trim().toUpperCase(), description: description.trim(), imageDataUrl: imageDataUrl || null,
+  };
+  onStage?.("Preparing public token metadata…");
+  const challenge = await postJson("/api/meteora/metadata/challenge", { ...payload, wallet: wallet.address });
+  const digestBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(payload)));
+  const digest = Array.from(new Uint8Array(digestBytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const cluster = import.meta.env.VITE_SOLANA_CLUSTER || "devnet";
+  const expectedMessage = [
+    "Toluva token metadata publication",
+    `Network: ${cluster}`,
+    `Wallet: ${wallet.address}`,
+    `Content SHA-256: ${digest}`,
+    `Expires: ${challenge.expiresAt}`,
+  ].join("\n");
+  if (challenge.wallet !== wallet.address
+      || JSON.stringify(challenge.payload) !== JSON.stringify(payload)
+      || challenge.message !== expectedMessage
+      || !Number.isInteger(challenge.expiresAt)
+      || challenge.expiresAt < Math.floor(Date.now() / 1000)
+      || challenge.expiresAt > Math.floor(Date.now() / 1000) + 300) {
+    throw new Error("Metadata approval differs from your token details. Nothing was signed.");
+  }
+  onStage?.("Approve publication of these token details in your wallet…");
+  const signed = await provider.signMessage(new TextEncoder().encode(challenge.message));
+  const signatureBytes = signed?.signature || signed;
+  if (!(signatureBytes instanceof Uint8Array) || signatureBytes.length !== 64) {
+    throw new Error("The wallet did not return a valid metadata approval.");
+  }
+  const signature = btoa(String.fromCharCode(...signatureBytes));
+  onStage?.("Publishing and verifying the public metadata…");
+  const result = await postJson("/api/meteora/metadata/publish", {
+    payload, wallet: wallet.address, expiresAt: challenge.expiresAt, message: challenge.message, signature,
+  });
+  if (!/^https:\/\//.test(result.uri) || result.uri.length > 200 || result.metadata?.name !== payload.name || result.metadata?.symbol !== payload.symbol) {
+    throw new Error("Published metadata does not match the reviewed token details.");
+  }
+  return result;
+}
+
 function assertBuiltTransaction(transaction, walletAddress, extraSigner) {
   const wallet = new PublicKey(walletAddress);
   if (!transaction.feePayer?.equals(wallet)) throw new Error("Transaction fee payer differs from the connected wallet.");
