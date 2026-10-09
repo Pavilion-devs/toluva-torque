@@ -41,6 +41,7 @@ import {
   readLocalMetadataAsset,
 } from "./services/meteora-metadata.js";
 import { verifyDbcSwapSignature } from "./services/meteora-activity.js";
+import { getConvictionProof } from "./services/conviction-proof.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
@@ -208,7 +209,7 @@ const server = http.createServer(async (req, res) => {
           "Content-Type": asset.contentType,
           "Content-Length": asset.bytes.length,
           "Cache-Control": "public, max-age=31536000, immutable",
-          "Access-Control-Allow-Origin": allowedOrigin,
+          "Access-Control-Allow-Origin": "*",
         });
         res.end(asset.bytes);
       }
@@ -295,6 +296,18 @@ const server = http.createServer(async (req, res) => {
       const trade = await verifyDbcSwapSignature({ signature: body.signature, pool: launch.dbc.pool, mint: launch.dbc.mint });
       const event = await recordVerifiedDbcTrade(launch, trade);
       sendJson(res, 200, { trade, eventId: event.id });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/conviction-proof") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const launch = (await readRegistry()).launches.find((item) => item.dbc?.pool === url.searchParams.get("pool") && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC pool is not registered on Toluva for the current network.");
+        error.status = 404;
+        throw error;
+      }
+      sendJson(res, 200, { proof: await getConvictionProof(launch) });
       return;
     }
 
@@ -589,6 +602,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
+server.listen(port, config.api.host, () => {
   console.log(`Toluva API listening on port ${port}`);
 });

@@ -57,6 +57,7 @@ This records the first Toluva-owned Meteora DBC pilot launched through the ordin
 ## Next evidence
 
 - Both pilot buy signatures independently pass Toluva's finalized DBC swap verifier. It checks the DBC `swap2` instruction, exact pool and mint, signer, and opposing wallet/pool token balance changes. The public page now reports **2 verified buys by 1 tracked buyer**, each linked to its transaction. Re-submitting the same signature leaves the event count at two. The devnet RPC returned the first buy by direct signature lookup while omitting it from that pool's address-history listing, so Toluva records verified submitted signatures and does not present its count as a complete chain index.
+- The [unfunded graduation checkpoint v1](conviction-proof-v1.md) reads the pilot's current finalized token balance and verified DAMM v2 state. The tracked wallet meets its 0.01 SOL buy and 1 token balance rules at the recorded read slot. This is a current-state proof, not an uninterrupted-hold or reward claim.
 - Wallet-signed DBC sell on a still-active curve: pending. This graduated pool has closed DBC trading, so that check requires another ordinary launch or an independent active pool.
 - Independent creator reproduction, general-purpose metadata hosting, published campaign eligibility and funded reward claim: pending.
 

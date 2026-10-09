@@ -655,6 +655,49 @@ function DbcActivityCard({ launch, explorer }) {
   );
 }
 
+function ConvictionProofCard({ launch, explorer }) {
+  const [proof, setProof] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const result = await getJson(`/api/meteora/conviction-proof?pool=${encodeURIComponent(launch.dbc.pool)}`);
+        if (active) { setProof(result.proof); setError(null); }
+      } catch (cause) { if (active) setError(cause.message || "Conviction proof is unavailable."); }
+    }
+    refresh();
+    const timer = window.setInterval(refresh, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [launch.dbc.pool]);
+
+  return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Conviction proof</h3>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Graduation checkpoint v1 · live on-chain facts</div>
+      </div>
+      <span className="status-pill pending">Unfunded proof</span>
+    </div>
+    <div style={{ fontSize: 12, color: "var(--ink-dim)", lineHeight: 1.6 }}>
+      {proof ? `A wallet meets this checkpoint now if it submitted a finalized DBC buy of at least ${Number(proof.policy.minimumVerifiedBuyLamports) / LAMPORTS_PER_SOL} SOL and currently holds at least ${Number(proof.policy.minimumCurrentTokenBaseUnits) / 1_000_000} ${launch.dbc.symbol} after verified DAMM v2 migration. Each wallet scores ${proof.policy.scorePerWallet} point.` : "Checking the published buy and token-balance rules."} Current balance is a snapshot; this does not prove uninterrupted holding or promise a reward.
+    </div>
+    {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+    {proof ? <>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <StatTile label="Meets checkpoint now" value={`${proof.walletsMeetingCheckpointNow}${proof.complete ? "" : "+"}`} />
+        <StatTile label="Tracked qualifying wallets" value={`${proof.qualifyingWalletsTracked}${proof.complete ? "" : "+"}`} />
+      </div>
+      {(proof.participants || []).map((person) => <div key={person.wallet} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12 }}>
+        <div><strong>{shortAddress(person.wallet)}</strong> · {person.status === "meets_checkpoint_now" ? "Meets checkpoint now" : person.status === "awaiting_migration" ? "Waiting for migration" : person.status === "balance_unavailable" ? "Balance check unavailable" : "Below current balance minimum"}<div style={{ color: "var(--muted)", marginTop: 2 }}>{person.heldBaseUnits === null ? "Balance pending" : `${(Number(person.heldBaseUnits) / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${launch.dbc.symbol} held at slot ${person.balanceSlot}`}</div></div>
+        <a href={explorer("tx", person.buySignature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>Verified buy {shortAddress(person.buySignature)} ↗</a>
+      </div>)}
+      {!proof.participants?.length && <div style={{ color: "var(--muted)", fontSize: 12 }}>No tracked wallet has submitted a qualifying buy.</div>}
+      <div style={{ color: "var(--muted)", fontSize: 11 }}>Checked {new Date(proof.checkedAt).toLocaleString()} · only submitted verified swaps are included.</div>
+    </> : !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking proof…</div>}
+  </div>;
+}
+
 function MeteoraMigrationCard({ launch, explorer }) {
   const wallet = useWallet();
   const chain = launch.dbc.liveStatus;
@@ -805,6 +848,7 @@ function MeteoraTokenDetailPage({ launch }) {
         <MeteoraMigrationCard launch={launch} explorer={explorer} />
       </div>
       <DbcActivityCard launch={launch} explorer={explorer} />
+      <ConvictionProofCard launch={launch} explorer={explorer} />
     </div>
   );
 }

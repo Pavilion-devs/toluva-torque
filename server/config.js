@@ -46,6 +46,7 @@ export const config = {
   legacyEnabled: process.env.TOLUVA_LEGACY_API_ENABLED === "true",
   api: {
     port: numberFromEnv(process.env.PORT || process.env.TOLUVA_API_PORT, 8787),
+    host: firstSet(process.env.TOLUVA_API_HOST, "0.0.0.0"),
     allowedOrigin: process.env.TOLUVA_ALLOWED_ORIGIN || "*",
   },
   registry: {

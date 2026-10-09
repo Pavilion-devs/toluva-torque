@@ -408,7 +408,7 @@ export async function recordVerifiedDbcTrade(launch, trade) {
   });
 }
 
-export async function getVerifiedDbcActivity(launch) {
+export async function listVerifiedDbcTrades(launch) {
   let events;
   let complete;
   if (supabase) {
@@ -429,6 +429,11 @@ export async function getVerifiedDbcActivity(launch) {
     complete = matching.length <= MAX_ACTIVITY_EVENTS;
     events = matching.slice(0, MAX_ACTIVITY_EVENTS);
   }
+  return { events, complete };
+}
+
+export async function getVerifiedDbcActivity(launch) {
+  const { events, complete } = await listVerifiedDbcTrades(launch);
   const buys = events.filter((event) => event.type === "dbc_buy_verified");
   return {
     source: "finalized_signatures_submitted_to_toluva",
