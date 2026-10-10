@@ -29,9 +29,10 @@ TOLUVA_LEGACY_API_ENABLED=false
 TOLUVA_REGISTRY_PATH=/var/lib/toluva/registry/registry.json
 TOLUVA_METADATA_DIR=/var/lib/toluva/metadata
 TOLUVA_METADATA_PUBLIC_BASE_URL=https://YOUR_DEVNET_HOST
+TOLUVA_METADATA_VERIFY_BASE_URL=http://toluva-web/metadata
 ```
 
-Use a dependable server-side RPC for the public trial if the shared devnet endpoint becomes unreliable. Give `/var/lib/toluva` to the container's unprivileged Node user and restrict the environment file to root. Configure the TierHive HAProxy domain to route to the VPS private address and port `3013`, then validate DNS and issue SSL. The hostname must remain live once token metadata URIs are written on chain.
+The optional verification base makes the API read each newly stored asset through the internal web proxy when the VPS cannot connect back to its own public IP. Returned token and image URIs still use the public HTTPS base; verify those URLs externally before accepting launches. Use a dependable server-side RPC for the public trial if the shared devnet endpoint becomes unreliable. Give `/var/lib/toluva` to the container's unprivileged Node user and restrict the environment file to root. Configure the TierHive HAProxy domain to route to the VPS private address and port `3013`, then validate DNS and issue SSL. The hostname must remain live once token metadata URIs are written on chain.
 
 ## Acceptance checks
 

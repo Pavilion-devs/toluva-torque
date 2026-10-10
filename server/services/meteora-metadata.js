@@ -28,6 +28,14 @@ function publicHttpsBase(value) {
   } catch { return null; }
 }
 
+function assetVerificationBase(value) {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    return url.toString().replace(/\/$/, "");
+  } catch { return null; }
+}
+
 function backend(settings = config) {
   const bucket = settings.metadata?.bucket;
   if (settings.supabase?.url && settings.supabase?.serviceRoleKey && /^[a-zA-Z0-9_-]+$/.test(bucket || "")) {
@@ -36,7 +44,12 @@ function backend(settings = config) {
   }
   const publicBase = publicHttpsBase(settings.metadata?.publicBaseUrl);
   if (settings.metadata?.directory && publicBase) {
-    return { type: "local", directory: path.resolve(settings.metadata.directory), publicBase: `${publicBase}/metadata`, settings };
+    const metadataBase = `${publicBase}/metadata`;
+    const verifyBase = settings.metadata.verifyBaseUrl
+      ? assetVerificationBase(settings.metadata.verifyBaseUrl)
+      : metadataBase;
+    if (!verifyBase) return null;
+    return { type: "local", directory: path.resolve(settings.metadata.directory), publicBase: metadataBase, verifyBase, settings };
   }
   return null;
 }
@@ -149,7 +162,7 @@ async function storeAsset(selected, assetPath, bytes, contentType, fetchImpl) {
   if (selected.type === "local") await storeLocal(selected, assetPath, bytes);
   else await storeSupabase(selected, assetPath, bytes, contentType);
   const publicUrl = `${selected.publicBase}/${assetPath}`;
-  await verifyPublicAsset(publicUrl, bytes, fetchImpl);
+  await verifyPublicAsset(`${selected.verifyBase || selected.publicBase}/${assetPath}`, bytes, fetchImpl);
   return publicUrl;
 }
 

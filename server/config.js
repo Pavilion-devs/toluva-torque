@@ -81,6 +81,7 @@ export const config = {
     bucket: firstSet(process.env.TOLUVA_METADATA_BUCKET),
     directory: firstSet(process.env.TOLUVA_METADATA_DIR),
     publicBaseUrl: firstSet(process.env.TOLUVA_METADATA_PUBLIC_BASE_URL),
+    verifyBaseUrl: firstSet(process.env.TOLUVA_METADATA_VERIFY_BASE_URL),
   },
 };
 

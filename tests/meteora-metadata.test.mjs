@@ -66,6 +66,36 @@ test("wallet-approved metadata is published at immutable local HTTPS URLs and re
   }
 });
 
+test("local metadata can verify through the private proxy while returning public HTTPS URLs", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "toluva-metadata-proxy-"));
+  const settings = {
+    solana: { cluster: "devnet" },
+    supabase: {},
+    metadata: {
+      directory,
+      publicBaseUrl: "https://devnet.toluva.xyz",
+      verifyBaseUrl: "http://toluva-web/metadata",
+    },
+  };
+  const wallet = Keypair.generate();
+  const requests = [];
+  try {
+    const challenge = createMetadataChallenge({ name: "Storage Check", symbol: "CHECK", wallet: wallet.publicKey.toBase58() }, settings, NOW);
+    const published = await publishTokenMetadata({ ...challenge, signature: signChallenge(challenge, wallet) }, {
+      settings,
+      now: NOW,
+      fetchImpl: async (url) => {
+        requests.push(url);
+        return new Response(await readFile(path.join(directory, new URL(url).pathname.replace(/^\/metadata\//, ""))), { status: 200 });
+      },
+    });
+    assert.match(published.uri, /^https:\/\/devnet\.toluva\.xyz\/metadata\/tokens\/[a-f0-9]{64}\.json$/);
+    assert.deepEqual(requests, [published.uri.replace("https://devnet.toluva.xyz", "http://toluva-web")]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("metadata approval rejects changed content, wrong wallet, bad signature and expiry", async () => {
   const settings = { solana: { cluster: "devnet" }, supabase: {}, metadata: { directory: "/tmp/toluva-test", publicBaseUrl: "https://metadata.toluva.test" } };
   const wallet = Keypair.generate();
