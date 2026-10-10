@@ -54,14 +54,17 @@ export function verifyDbcSwapTransaction(transaction, { signature, pool, mint })
   const wallet = address(ownerIndex);
   if (!wallet || ownerIndex >= message.header.numRequiredSignatures) badRequest("DBC trade owner did not sign the transaction.");
 
-  const userBaseDelta = balanceDelta(transaction, accounts[4], mint, wallet);
+  const userSourceBaseDelta = balanceDelta(transaction, accounts[3], mint, wallet);
+  const userDestinationBaseDelta = balanceDelta(transaction, accounts[4], mint, wallet);
+  const userBaseDelta = userSourceBaseDelta === null ? userDestinationBaseDelta
+    : userDestinationBaseDelta === null ? userSourceBaseDelta : null;
   const vaultBaseDelta = balanceDelta(transaction, accounts[5], mint);
   const vaultQuoteDelta = balanceDelta(transaction, accounts[6], NATIVE_MINT.toBase58());
   if (userBaseDelta === null || vaultBaseDelta === null || vaultQuoteDelta === null) {
     badRequest("Transaction lacks the token balance evidence needed to verify the swap.");
   }
-  const buy = userBaseDelta > 0n && vaultBaseDelta < 0n && vaultQuoteDelta > 0n;
-  const sell = userBaseDelta < 0n && vaultBaseDelta > 0n && vaultQuoteDelta < 0n;
+  const buy = userSourceBaseDelta === null && userBaseDelta > 0n && vaultBaseDelta < 0n && vaultQuoteDelta > 0n;
+  const sell = userDestinationBaseDelta === null && userBaseDelta < 0n && vaultBaseDelta > 0n && vaultQuoteDelta < 0n;
   if (!buy && !sell) badRequest("Token balance changes do not prove a DBC buy or sell.");
   if (userBaseDelta !== -vaultBaseDelta) badRequest("User and pool base-token balance changes disagree.");
 

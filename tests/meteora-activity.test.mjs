@@ -9,7 +9,7 @@ const pool = "DFxmgj3i6rRsf1p13FxuvKELZ3Ktk5MVGLNcKPu8Kbaa";
 const mint = "4eRL2sk1EUdAi3YuBDfqT2xx46X5WFpN7N3xmN9QSDtj";
 const nativeMint = "So11111111111111111111111111111111111111112";
 const program = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN";
-const keys = [wallet, pool, mint, nativeMint, "G8Qm7wzmVq99rdRychUGRJ3RL8qvriZi19jjn7aNNTg6", "8PvaPgHY3PPxn8sxDKe83AXUWrnov463o2UqFtvEGSuE", "Z1vH3uJbagf8FC8Q6EpSpEmsJK6azZpawJse47iRfQQ", program].map((address) => new PublicKey(address));
+const keys = [wallet, pool, mint, nativeMint, "G8Qm7wzmVq99rdRychUGRJ3RL8qvriZi19jjn7aNNTg6", "8PvaPgHY3PPxn8sxDKe83AXUWrnov463o2UqFtvEGSuE", "Z1vH3uJbagf8FC8Q6EpSpEmsJK6azZpawJse47iRfQQ", program, "Che9BeFUM6LwY8zmkxZkyKQoYDXwCpvV9oWSvrFXHAMj"].map((address) => new PublicKey(address));
 const discriminator = createHash("sha256").update("global:swap2").digest().subarray(0, 8);
 
 function balance(accountIndex, tokenMint, amount, owner = pool) {
@@ -31,7 +31,7 @@ function fixture(direction = "buy") {
       message: {
         header: { numRequiredSignatures: 1 },
         getAccountKeys: () => ({ get: (index) => keys[index] }),
-        compiledInstructions: [{ programIdIndex: 7, data: discriminator, accountKeyIndexes: [0, 0, 1, 0, 4, 5, 6, 2, 3, 0] }],
+        compiledInstructions: [{ programIdIndex: 7, data: discriminator, accountKeyIndexes: [0, 0, 1, buy ? 8 : 4, buy ? 4 : 8, 5, 6, 2, 3, 0] }],
       },
     },
   };
