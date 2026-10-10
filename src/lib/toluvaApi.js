@@ -1,8 +1,9 @@
-export const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : null);
+export const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL
+  || (import.meta.env.DEV ? "http://127.0.0.1:8787" : typeof window !== "undefined" ? window.location.origin : null);
 
 export function requireApiBaseUrl() {
   if (!apiBaseUrl) {
-    throw new Error("Toluva API is not configured. Run `npm run dev` or set VITE_TOLUVA_API_URL.");
+    throw new Error("Toluva API is unavailable. Run `npm run dev` or configure a public API origin.");
   }
 
   return apiBaseUrl;

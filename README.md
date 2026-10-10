@@ -25,7 +25,7 @@ npm run dev
 
 The frontend runs on port 5173 and the API on port 8787. Run `npm test` for the economic config checks and `npm run build` for the production frontend build.
 
-For a public deployment, configure `VITE_TOLUVA_API_URL` with a reachable API origin. The frontend shows an API error if it is missing. Configure `SOLANA_CLUSTER=devnet` and `SOLANA_RPC_URL` for the API; set `VITE_SOLANA_RPC_URL` to an RPC for the same cluster. The launch flow currently rejects non-devnet pool/config creation. Supabase remains optional locally; a persistent public registry needs the updated [schema](scripts/supabase-schema.sql) with the `dbc` column.
+For a public deployment, serve the web app and API on one HTTPS origin or set `VITE_TOLUVA_API_URL` when they use separate origins. Configure `SOLANA_CLUSTER=devnet` and `SOLANA_RPC_URL` for the API; set `VITE_SOLANA_RPC_URL` to an RPC for the same cluster. The launch flow currently rejects non-devnet pool/config creation. Supabase remains optional locally; a persistent public registry needs the updated [schema](scripts/supabase-schema.sql) with the `dbc` column. A Docker layout for the shared TierHive VPS is in [the TierHive deployment guide](docs/tierhive-deploy.md).
 
 Creators need a Solana browser wallet and devnet SOL for account rent and fees. They can use Toluva-hosted metadata when storage is configured, or supply a public HTTPS token JSON URI. Toluva does not hold creator keys or silently substitute a demo wallet.
 

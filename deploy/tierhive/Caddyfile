@@ -1,0 +1,17 @@
+:80 {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy toluva-api:8787
+    }
+
+    handle /metadata/* {
+        reverse_proxy toluva-api:8787
+    }
+
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

@@ -1,7 +1,7 @@
 import React from "react";
 import fallbackRegistry from "../../data/launch-registry.json";
+import { apiBaseUrl } from "./toluvaApi";
 
-const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : null);
 const registryRefreshMs = 10_000;
 const lamportsPerSol = 1_000_000_000;
 const listeners = new Set();
