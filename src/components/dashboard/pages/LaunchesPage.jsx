@@ -302,12 +302,15 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
   const activePending = pending?.draftKey === draftKey ? pending : null;
 
   function updateDetail(field, value) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-      uri: ["name", "symbol", "description", "imageDataUrl"].includes(field)
-        && activePending?.hostedMetadata?.uri === current.uri ? "" : current.uri,
-    }));
+    setForm((current) => {
+      const clearHostedUri = ["name", "symbol", "description", "imageDataUrl"].includes(field)
+        && activePending?.hostedMetadata?.uri === current.uri;
+      return {
+        ...current,
+        [field]: value,
+        uri: field === "uri" ? value : clearHostedUri ? "" : current.uri,
+      };
+    });
     if (activePending?.hostedMetadata && ["name", "symbol", "description", "imageDataUrl"].includes(field)) {
       setPending((current) => ({ ...current, hostedMetadata: null }));
     }
