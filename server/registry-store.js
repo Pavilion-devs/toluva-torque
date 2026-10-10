@@ -328,8 +328,8 @@ export async function createCampaign(input) {
 }
 
 export async function recordEvent(input) {
-  if (String(input.type || input.eventType || "").startsWith("dbc_") || String(input.id || "").startsWith("dbc_swap_")) {
-    const error = new Error("DBC activity is recorded only by the on-chain transaction verifier.");
+  if (/^(dbc_|conviction_)/.test(String(input.type || input.eventType || "")) || /^(dbc_swap_|conviction_)/.test(String(input.id || ""))) {
+    const error = new Error("On-chain activity and conviction observations are recorded only by server verifiers.");
     error.status = 400;
     throw error;
   }
@@ -416,6 +416,7 @@ export async function listVerifiedDbcTrades(launch) {
       .select("*")
       .eq("token", launch.sym)
       .in("type", DBC_ACTIVITY_TYPES)
+      .contains("payload", { pool: launch.dbc.pool })
       .order("created_at", { ascending: false })
       .limit(MAX_ACTIVITY_EVENTS + 1);
     if (response.error) dbErr("verified DBC activity select", response.error);
@@ -424,12 +425,63 @@ export async function listVerifiedDbcTrades(launch) {
   } else {
     const registry = await readFileRegistry();
     const matching = (registry.eventReceipts || [])
-      .filter((event) => event.token === launch.sym && DBC_ACTIVITY_TYPES.includes(event.type))
+      .filter((event) => event.token === launch.sym && DBC_ACTIVITY_TYPES.includes(event.type)
+        && event.payload?.pool === launch.dbc.pool)
       .sort((a, b) => Number(b.payload?.slot || 0) - Number(a.payload?.slot || 0));
     complete = matching.length <= MAX_ACTIVITY_EVENTS;
     events = matching.slice(0, MAX_ACTIVITY_EVENTS);
   }
   return { events, complete };
+}
+
+const CONVICTION_OBSERVATION_TYPE = "conviction_balance_checkpoint_v2";
+
+export async function listConvictionObservations(launch) {
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts")
+      .select("*")
+      .eq("type", CONVICTION_OBSERVATION_TYPE)
+      .eq("token", launch.dbc.mint)
+      .order("created_at", { ascending: true })
+      .limit(1000);
+    if (error) dbErr("conviction observations select", error);
+    if (data.length === 1000) throw new Error("Conviction observation capacity reached; the leaderboard needs pagination before new checkpoints can be recorded.");
+    return data.map(eventFromRow).filter((event) => event.payload?.pool === launch.dbc.pool);
+  }
+  const registry = await readFileRegistry();
+  return (registry.eventReceipts || []).filter((event) => event.type === CONVICTION_OBSERVATION_TYPE
+    && event.token === launch.dbc.mint && event.payload?.pool === launch.dbc.pool);
+}
+
+export async function recordConvictionObservation(launch, observation) {
+  const phase = observation.phase;
+  if (phase !== "entry" && phase !== "followup") throw new Error("Invalid conviction checkpoint phase.");
+  const row = normalizeEventInsert({
+    id: `conviction_v2_${launch.dbc.pool}_${observation.wallet}_${phase}`,
+    type: CONVICTION_OBSERVATION_TYPE,
+    token: launch.dbc.mint,
+    wallet: observation.wallet,
+    payload: { ...observation, pool: launch.dbc.pool, mint: launch.dbc.mint, policyId: "conviction-checkpoints-v2" },
+    status: "finalized",
+    createdAt: new Date(observation.blockTime * 1000).toISOString(),
+  });
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts")
+      .upsert(row, { onConflict: "id", ignoreDuplicates: true }).select().maybeSingle();
+    if (error) dbErr("conviction observation insert", error);
+    if (data) return eventFromRow(data);
+    const existing = await supabase.from("event_receipts").select("*").eq("id", row.id).single();
+    if (existing.error) dbErr("conviction observation lookup", existing.error);
+    return eventFromRow(existing.data);
+  }
+  return updateFileRegistry((registry) => {
+    registry.eventReceipts = registry.eventReceipts || [];
+    const existing = registry.eventReceipts.find((event) => event.id === row.id);
+    if (existing) return existing;
+    const event = eventFromRow(row);
+    registry.eventReceipts.unshift(event);
+    return event;
+  });
 }
 
 export async function getVerifiedDbcActivity(launch) {

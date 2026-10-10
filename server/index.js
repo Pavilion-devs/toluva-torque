@@ -605,3 +605,24 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, config.api.host, () => {
   console.log(`Toluva API listening on port ${port}`);
 });
+
+let sampling = false;
+async function sampleConvictionLaunches() {
+  if (sampling) return;
+  sampling = true;
+  try {
+    const launches = (await readRegistry()).launches || [];
+    for (const launch of launches) {
+      if (!launch.dbc?.pool || launch.dbc.cluster !== config.solana.cluster) continue;
+      try { await getConvictionProof(launch); }
+      catch (error) { console.warn(`Conviction observation for ${launch.dbc.pool} delayed: ${error.message}`); }
+    }
+  } catch (error) {
+    console.warn(`Conviction observation cycle delayed: ${error.message}`);
+  } finally {
+    sampling = false;
+  }
+}
+
+setTimeout(sampleConvictionLaunches, 5_000).unref();
+setInterval(sampleConvictionLaunches, 5 * 60_000).unref();

@@ -1,5 +1,7 @@
 # Graduation checkpoint v1
 
+Historical policy: the live product now uses [Conviction checkpoints v2](conviction-checkpoints-v2.md). V1 balance checks are not imported as historical v2 observations.
+
 This is a public, unfunded Conviction proof for each registered Meteora DBC launch. It answers a narrow question: which tracked wallets made a meaningful DBC buy and still hold the token at the current finalized chain snapshot after migration? It is not a funded reward campaign or a claim of uninterrupted holding.
 
 ## Fixed policy

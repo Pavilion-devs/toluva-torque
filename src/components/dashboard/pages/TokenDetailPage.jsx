@@ -671,29 +671,41 @@ function ConvictionProofCard({ launch, explorer }) {
     return () => { active = false; window.clearInterval(timer); };
   }, [launch.dbc.pool]);
 
+  const checkpoint = (observation, label) => <div key={label} style={{ borderTop: "1px solid var(--line)", paddingTop: 7, fontSize: 11, color: "var(--muted)" }}>
+    <strong style={{ color: "var(--ink)" }}>{label}</strong>: {observation
+      ? <>{(Number(observation.amount) / (10 ** proof.policy.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 3 })} {launch.dbc.symbol} at finalized slot {observation.slot} · {new Date(observation.blockTime * 1000).toLocaleString()}{observation.accounts?.length > 0 && <> · <a href={explorer("address", observation.accounts[0])} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>token account ↗</a></>}</>
+      : "pending"}
+  </div>;
+
   return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
       <div>
-        <h3 style={{ margin: 0 }}>Conviction proof</h3>
-        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Graduation checkpoint v1 · live on-chain facts</div>
+        <h3 style={{ margin: 0 }}>Conviction leaderboard</h3>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Fixed policy {proof?.policy.id || "conviction-checkpoints-v2"} · finalized chain evidence</div>
       </div>
       <span className="status-pill pending">Unfunded proof</span>
     </div>
     <div style={{ fontSize: 12, color: "var(--ink-dim)", lineHeight: 1.6 }}>
-      {proof ? `A wallet meets this checkpoint now if it submitted a finalized DBC buy of at least ${Number(proof.policy.minimumVerifiedBuyLamports) / LAMPORTS_PER_SOL} SOL and currently holds at least ${Number(proof.policy.minimumCurrentTokenBaseUnits) / 1_000_000} ${launch.dbc.symbol} after verified DAMM v2 migration. Each wallet scores ${proof.policy.scorePerWallet} point.` : "Checking the published buy and token-balance rules."} Current balance is a snapshot; this does not prove uninterrupted holding or promise a reward.
+      {proof ? `A wallet enters with a verified DBC buy of at least ${Number(proof.policy.minimumVerifiedBuyLamports) / LAMPORTS_PER_SOL} SOL. After DAMM v2 migration, Toluva records two finalized balance checkpoints at least ${proof.policy.minimumSecondsBetweenCheckpoints / 3600} hours apart. Each must hold at least ${Number(proof.policy.minimumTokenBaseUnitsAtEachCheckpoint) / (10 ** proof.policy.tokenDecimals)} ${launch.dbc.symbol} to qualify.` : "Checking the published buy and observation rules."} The checkpoints do not prove uninterrupted holding. No reward is funded or claimable.
     </div>
     {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
     {proof ? <>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <StatTile label="Meets checkpoint now" value={`${proof.walletsMeetingCheckpointNow}${proof.complete ? "" : "+"}`} />
+        <StatTile label="Eligible after two checkpoints" value={`${proof.walletsEligible}${proof.complete ? "" : "+"}`} />
         <StatTile label="Tracked qualifying wallets" value={`${proof.qualifyingWalletsTracked}${proof.complete ? "" : "+"}`} />
       </div>
-      {(proof.participants || []).map((person) => <div key={person.wallet} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12 }}>
-        <div><strong>{shortAddress(person.wallet)}</strong> · {person.status === "meets_checkpoint_now" ? "Meets checkpoint now" : person.status === "awaiting_migration" ? "Waiting for migration" : person.status === "balance_unavailable" ? "Balance check unavailable" : "Below current balance minimum"}<div style={{ color: "var(--muted)", marginTop: 2 }}>{person.heldBaseUnits === null ? "Balance pending" : `${(Number(person.heldBaseUnits) / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${launch.dbc.symbol} held at slot ${person.balanceSlot}`}</div></div>
-        <a href={explorer("tx", person.buySignature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>Verified buy {shortAddress(person.buySignature)} ↗</a>
+      {(proof.participants || []).map((person, index) => <div key={person.wallet} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12, display: "grid", gap: 7 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div><strong>#{index + 1} · {shortAddress(person.wallet)}</strong> · {person.score}/{proof.policy.pointsRequiredForEligibility} points · {person.status === "eligible" ? "Eligible proof" : person.status === "awaiting_migration" ? "Waiting for migration" : person.status === "awaiting_entry" ? "First checkpoint pending" : person.status === "awaiting_followup" ? "Second checkpoint pending" : "Policy not met"}</div>
+          <a href={explorer("tx", person.buySignature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>Verified buy {shortAddress(person.buySignature)} ↗</a>
+        </div>
+        {checkpoint(person.checkpoints.entry, "Entry")}
+        {checkpoint(person.checkpoints.followup, "Follow-up")}
+        {person.nextCheckpointAfter && <div style={{ color: "var(--muted)", fontSize: 11 }}>Follow-up can be observed after {new Date(person.nextCheckpointAfter).toLocaleString()}.</div>}
       </div>)}
       {!proof.participants?.length && <div style={{ color: "var(--muted)", fontSize: 12 }}>No tracked wallet has submitted a qualifying buy.</div>}
-      <div style={{ color: "var(--muted)", fontSize: 11 }}>Checked {new Date(proof.checkedAt).toLocaleString()} · only submitted verified swaps are included.</div>
+      {proof.observationErrors?.length > 0 && <div style={{ color: "#9f1239", fontSize: 11 }}>Balance observation delayed for {proof.observationErrors.length} wallet(s); the server will retry.</div>}
+      <div style={{ color: "var(--muted)", fontSize: 11 }}>Checked {new Date(proof.checkedAt).toLocaleString()} · verified submitted swaps only{proof.complete ? "" : " · coverage limit reached"}. Balance readings are stored at their first eligible observation; a missed checkpoint cannot be backdated.</div>
     </> : !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking proof…</div>}
   </div>;
 }
