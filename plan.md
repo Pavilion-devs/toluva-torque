@@ -184,6 +184,7 @@ These are ordered by dependency, not by a deadline. Do not expand scope until th
 - Build validation and preview for reusable config selection. Create and publish the first config through a documented Toluva wallet flow.
 - Build the self-service custom-config flow with user-signed creation and transparent fee recipients.
 - Upload metadata and let an unaffiliated creator wallet launch a token/virtual pool from either supported config path on devnet.
+- Follow the [independent devnet pilot](docs/independent-devnet-pilot.md) for an unaffiliated participant's normal buy/sell and usability evidence; record only finalized activity.
 - Persist and reread all addresses from chain; handle rejected signatures and retries.
 - Show public launch terms and explorer links.
 
