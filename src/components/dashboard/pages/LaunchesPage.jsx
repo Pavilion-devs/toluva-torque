@@ -11,6 +11,7 @@ const statusMap = {
   migrating: { label: "Migrating", pill: "progress"  },
   migrated:  { label: "Migrated",  pill: "completed" },
   draft:     { label: "Draft",     pill: "pending"   },
+  unknown:   { label: "Status unavailable", pill: "pending" },
 };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -612,7 +613,10 @@ function GradientTile({ symbol }) {
 }
 
 function LaunchCard({ launch }) {
-  const statusInfo = statusMap[launch.status] || { label: launch.status, pill: "pending" };
+  const knownStatus = statusMap[launch.status] || { label: "Status unavailable", pill: "pending" };
+  const statusInfo = launch.dbc?.liveStale && launch.status !== "unknown"
+    ? { ...knownStatus, label: `${knownStatus.label} · updating` }
+    : knownStatus;
   const progress = Math.max(0, Math.min(100, Number(launch.bonded) || 0));
   const buyers = launch.dbc ? launch.dbc.activity?.trackedBuyers : Number(launch.buyers) || 0;
   const ticker = launch.dbc?.symbol || launch.sym;

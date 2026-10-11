@@ -42,13 +42,14 @@ import {
 } from "./services/meteora-metadata.js";
 import { verifyDbcSwapSignature } from "./services/meteora-activity.js";
 import { getConvictionProof } from "./services/conviction-proof.js";
+import { publicPoolStatusCache } from "./services/meteora-status-cache.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
-const lastVerifiedDbcStatus = new Map();
 
 function livePoolError(error) {
   const message = error?.message || "";
+  if (/429|rate limit/i.test(message)) return "Solana is busy. Retrying automatically.";
   if (message === "fetch failed" || /ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|network request failed/i.test(message)) {
     return "Solana RPC is unreachable. Retrying automatically.";
   }
@@ -134,23 +135,27 @@ async function registryWithLivePoolState() {
           launch.dbc.activity = { error: error.message || "Verified activity is unavailable." };
         }
         try {
-          const status = await getPoolStatus(launch.dbc.pool);
-          const checkedAt = new Date().toISOString();
-          lastVerifiedDbcStatus.set(launch.dbc.pool, { status, checkedAt });
-          launch.dbc = { ...launch.dbc, liveStatus: status, liveCheckedAt: checkedAt, liveStale: false, liveError: null };
-          launch.bonded = status.progressPercent;
-          launch.migrationState = status.dammV2.verified ? "migrated" : status.migrationStage === "bonding" ? "bonding" : "migrating";
-          launch.status = launch.migrationState;
-        } catch (error) {
-          const previous = lastVerifiedDbcStatus.get(launch.dbc.pool);
+          const current = await publicPoolStatusCache.read(launch.dbc.pool);
           launch.dbc = {
             ...launch.dbc,
-            liveStatus: previous?.status || null,
-            liveCheckedAt: previous?.checkedAt || null,
-            liveLastAttemptAt: new Date().toISOString(),
-            liveStale: true,
-            liveError: livePoolError(error),
+            liveStatus: current.status,
+            liveCheckedAt: current.checkedAt,
+            liveLastAttemptAt: current.stale ? new Date().toISOString() : null,
+            liveStale: current.stale,
+            liveError: current.error ? livePoolError(current.error) : null,
           };
+          if (current.status) {
+            launch.bonded = current.status.progressPercent;
+            launch.migrationState = current.status.dammV2.verified ? "migrated" : current.status.migrationStage === "bonding" ? "bonding" : "migrating";
+            launch.status = launch.migrationState;
+          } else {
+            launch.migrationState = "unknown";
+            launch.status = "unknown";
+          }
+        } catch (error) {
+          launch.dbc = { ...launch.dbc, liveStatus: null, liveStale: true, liveError: livePoolError(error) };
+          launch.migrationState = "unknown";
+          launch.status = "unknown";
         }
         return;
       }

@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { config } from "../config.js";
 import { listConvictionObservations, listVerifiedDbcTrades, recordConvictionObservation } from "../registry-store.js";
-import { getPoolStatus } from "./meteora-dbc.js";
+import { publicPoolStatusCache } from "./meteora-status-cache.js";
 
 export const CONVICTION_PROOF_POLICY = Object.freeze({
   id: "conviction-checkpoints-v2",
@@ -103,16 +103,18 @@ async function readWalletBalance(wallet, mint) {
 }
 
 async function buildConvictionProof(launch) {
-  const [{ events, complete }, pool, existing] = await Promise.all([
-    listVerifiedDbcTrades(launch), getPoolStatus(launch.dbc.pool), listConvictionObservations(launch),
+  const [{ events, complete }, poolRead, existing] = await Promise.all([
+    listVerifiedDbcTrades(launch), publicPoolStatusCache.read(launch.dbc.pool), listConvictionObservations(launch),
   ]);
+  if (!poolRead.status) throw poolRead.error || new Error("Pool status is temporarily unavailable.");
+  const pool = poolRead.status;
   const migrated = pool.dammV2?.verified === true;
   const candidates = qualifyingBuys(events);
   const selected = candidates.slice(0, MAX_WALLETS);
   const observations = [...existing];
   const byWallet = checkpointMap(existing);
   const errors = [];
-  if (migrated) {
+  if (migrated && !poolRead.stale) {
     for (let index = 0; index < selected.length; index += 4) {
       await Promise.all(selected.slice(index, index + 4).map(async (buy) => {
         const wallet = buy.wallet;
@@ -139,6 +141,8 @@ async function buildConvictionProof(launch) {
     pool: launch.dbc.pool,
     mint: launch.dbc.mint,
     migrated,
+    chainStale: poolRead.stale,
+    chainCheckedAt: poolRead.checkedAt,
     source: "finalized_submitted_swaps_and_persisted_finalized_balance_checkpoints",
     complete: complete && candidates.length <= MAX_WALLETS,
     checkedAt: new Date().toISOString(),

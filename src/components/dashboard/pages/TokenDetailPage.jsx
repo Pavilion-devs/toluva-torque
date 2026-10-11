@@ -712,6 +712,7 @@ function ConvictionProofCard({ launch, explorer }) {
         {person.nextCheckpointAfter && <div style={{ color: "var(--muted)", fontSize: 11 }}>Follow-up can be observed after {new Date(person.nextCheckpointAfter).toLocaleString()}.</div>}
       </div>)}
       {!proof.participants?.length && <div style={{ color: "var(--muted)", fontSize: 12 }}>No tracked wallet has submitted a qualifying buy.</div>}
+      {proof.chainStale && <div style={{ color: "#9f1239", fontSize: 11 }}>Live chain updates are delayed. Saved checkpoint evidence remains visible; new observations will resume when Solana responds.</div>}
       {proof.observationErrors?.length > 0 && <div style={{ color: "#9f1239", fontSize: 11 }}>Balance observation delayed for {proof.observationErrors.length} wallet(s); the server will retry.</div>}
       <div style={{ color: "var(--muted)", fontSize: 11 }}>Checked {new Date(proof.checkedAt).toLocaleString()} · verified submitted swaps only{proof.complete ? "" : " · coverage limit reached"}. Balance readings are stored at their first eligible observation; a missed checkpoint cannot be backdated.</div>
     </> : !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking proof…</div>}

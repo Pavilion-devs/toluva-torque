@@ -29,7 +29,10 @@ export const METEORA_DBC_PROGRAM = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
 export const CONVICTION_RECIPE_VERSION = 1;
 export const DEFAULT_THRESHOLD_SOL = 5;
 
-const connection = new Connection(config.solana.rpcUrl, config.solana.commitment);
+const connection = new Connection(config.solana.rpcUrl, {
+  commitment: config.solana.commitment,
+  disableRetryOnRateLimit: true,
+});
 const client = DynamicBondingCurveClient.create(connection, config.solana.commitment);
 const dammProgram = createDammV2Program(connection, config.solana.commitment);
 
