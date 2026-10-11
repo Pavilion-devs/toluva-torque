@@ -877,7 +877,7 @@ function MeteoraTokenDetailPage({ launch }) {
 }
 
 export default function TokenDetailPage({ sym }) {
-  const { registry } = useRegistry();
+  const { registry, source, loading, error } = useRegistry();
   const wallet = useWallet();
   const [now, setNow] = React.useState(() => new Date());
 
@@ -889,16 +889,23 @@ export default function TokenDetailPage({ sym }) {
   const launch = (registry.launches || []).find((l) => l.sym === sym);
 
   if (!launch) {
+    const waitingForRegistry = source === "static" || (loading && source !== "api");
+    const registryUnavailable = source === "offline" && !loading;
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h1>Token not found</h1>
-            <div className="sub">No launch with symbol ${sym} in the local registry.</div>
+            <h1>{waitingForRegistry ? "Loading launch…" : registryUnavailable ? "Launches are temporarily unavailable" : "Launch not found"}</h1>
+            <div className="sub">{waitingForRegistry
+              ? "Checking the latest launches."
+              : registryUnavailable
+                ? friendlyError(error, "data")
+                : "We couldn't find this launch. Check the link or explore all launches."}</div>
           </div>
         </div>
         <div>
-          <Link href="/launches" className="btn ghost">← Back to launches</Link>
+          {registryUnavailable && <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Try again</button>}
+          {!waitingForRegistry && <Link href="/launches" className="btn ghost">← All launches</Link>}
         </div>
       </div>
     );
