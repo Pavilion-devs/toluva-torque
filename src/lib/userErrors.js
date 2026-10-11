@@ -14,10 +14,15 @@ export function friendlyError(error, action = "data") {
   if (error?.code === "CONFIRMATION_UNKNOWN") {
     return "Your transaction was sent, but we couldn't confirm its result yet. Check its status before trying again.";
   }
-  if (error?.code === "BLOCKHASH_EXPIRED" || /blockhash not found|blockhash.*expir|block height exceeded|blockheight exceeded|transactionexpiredblockheight/.test(message)) {
+  if (error?.code === "BLOCKHASH_EXPIRED" || /blockhash.*expir|block height exceeded|blockheight exceeded|transactionexpiredblockheight/.test(message)) {
     if (action === "trade") return "The wallet approval expired. Review a fresh quote and try again.";
     if (action === "migration") return "The wallet approval expired. Try the migration again with a new wallet request.";
     return "The wallet approval expired before Solana accepted it. Your completed steps are saved; try again with the button below.";
+  }
+  if (/blockhash not found|minimum context slot/.test(message)) {
+    if (action === "trade") return "Solana couldn't accept this trade in time. Review a fresh quote and try again.";
+    if (action === "migration") return "Solana couldn't accept this migration in time. Refresh the pool status and try again.";
+    return "Solana couldn't accept this launch step in time. Any confirmed steps are saved; try again with the button below.";
   }
   if (/user rejected|user declined|rejected the request|request rejected|cancelled by user|canceled by user|4001/.test(message)) {
     return "The wallet request was cancelled. You can try again when you're ready.";

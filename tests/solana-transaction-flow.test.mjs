@@ -116,6 +116,7 @@ test("uncertain confirmation keeps the RPC transaction ID", async () => {
 test("public errors explain recovery without exposing RPC or simulation details", () => {
   assert.match(friendlyError(new Error("Simulation failed. Message: Transaction simulation failed: Blockhash not found. Logs: []"), "launch"), /try again/i);
   assert.doesNotMatch(friendlyError(new Error("Simulation failed. Message: Transaction simulation failed: Blockhash not found. Logs: []"), "launch"), /simulation|blockhash|logs/i);
+  assert.match(friendlyError(new Error("Minimum context slot has not been reached"), "launch"), /try again/i);
   assert.match(friendlyError(new Error("fetch failed"), "data"), /temporarily unavailable/i);
   assert.match(friendlyError(new Error("User rejected the request"), "wallet"), /cancelled/i);
   assert.match(friendlyError({ code: "CONFIRMATION_UNKNOWN" }, "trade"), /check its status/i);
