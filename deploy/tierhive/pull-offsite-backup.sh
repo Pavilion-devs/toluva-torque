@@ -19,6 +19,13 @@ if [[ ! "$latest" =~ ^toluva-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.tar\.gz$ ]]; then
   exit 1
 fi
 
+if [[ -f "$destination/$latest" && -f "$destination/$latest.sha256" ]]; then
+  if python3 "$(dirname "$0")/data-backup.py" verify "$destination/$latest" >/dev/null; then
+    echo "Latest offsite backup is already verified: $destination/$latest"
+    exit 0
+  fi
+fi
+
 scp -q -o BatchMode=yes -P "$ssh_port" \
   "$ssh_target:/var/backups/toluva/$latest" "$destination/$latest"
 scp -q -o BatchMode=yes -P "$ssh_port" \

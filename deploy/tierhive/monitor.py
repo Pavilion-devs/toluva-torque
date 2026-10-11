@@ -22,7 +22,7 @@ def read(origin, path):
         return response.read()
 
 
-def check(origin, data_dir):
+def check(origin, data_dir=None):
     health = json.loads(read(origin, "/api/health"))
     if health.get("ok") is not True:
         raise ValueError("API health check failed")
@@ -59,19 +59,23 @@ def check(origin, data_dir):
         if hashlib.sha256(image).hexdigest() != ASSET_PATH.fullmatch(image_path).group(1):
             raise ValueError(f"Hosted image changed for {launch.get('name', 'a launch')}")
 
-    disk = shutil.disk_usage(data_dir)
-    if disk.used / disk.total > 0.90:
-        raise ValueError("Toluva data disk is over 90% full")
-    return {"ok": True, "launches": len(launches), "diskUsedPercent": round(disk.used / disk.total * 100, 1)}
+    result = {"ok": True, "launches": len(launches)}
+    if data_dir:
+        disk = shutil.disk_usage(data_dir)
+        if disk.used / disk.total > 0.90:
+            raise ValueError("Toluva data disk is over 90% full")
+        result["diskUsedPercent"] = round(disk.used / disk.total * 100, 1)
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", default="http://10.3.245.2:3013")
     parser.add_argument("--data-dir", default="/var/lib/toluva")
+    parser.add_argument("--skip-disk", action="store_true", help="For an external HTTPS check from another machine")
     args = parser.parse_args()
     try:
-        print(json.dumps(check(args.origin.rstrip("/"), args.data_dir)))
+        print(json.dumps(check(args.origin.rstrip("/"), None if args.skip_disk else args.data_dir)))
     except Exception as error:
         print(json.dumps({"ok": False, "problem": str(error)}), file=sys.stderr)
         raise SystemExit(1)

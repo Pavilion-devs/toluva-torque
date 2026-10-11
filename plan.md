@@ -212,6 +212,7 @@ These are ordered by dependency, not by a deadline. Do not expand scope until th
 
 ### M4 — Reward distribution, if supported
 
+- Follow the [Conviction funding and claim gate](docs/conviction-rewards-plan.md); keep the current proof-only status until the full budget and claim path verify on chain.
 - Verify Torque's current data-source, network, incentive creation, funding, and claim capabilities against official docs and a small test.
 - Provision one actual campaign and persist its remote ID; show funding status and claim receipts.
 - If Torque cannot support the chosen lifecycle safely, keep the on-chain verified campaign proof and use a separate, explicitly designed distribution mechanism only after review.

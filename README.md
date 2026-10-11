@@ -32,8 +32,8 @@ Creators need a Solana browser wallet and devnet SOL for account rent and fees. 
 ## Next integration gates
 
 1. Have an unaffiliated creator complete the normal devnet launch, and an independent participant test buy/sell and verify public activity using the [pilot guide](docs/independent-devnet-pilot.md).
-2. Improve RPC reliability, monitoring and durable storage before relying on the public service for a funded campaign.
-3. Complete a two-wallet Conviction observation and design a funded reward claim only after the verified proof and payout path are reviewed.
+2. Choose a dependable RPC and move funded-campaign data to a durable host. The devnet VPS now has [verified backups and internal/external checks](docs/tierhive-operations.md).
+3. Complete a two-wallet Conviction observation and follow the [funding and claim gate](docs/conviction-rewards-plan.md) before presenting rewards as live.
 
 See [plan.md](plan.md) for exit criteria and evidence standards.
 For the current public devnet host, use the [TierHive deployment guide](docs/tierhive-deploy.md); preserve the metadata volume and API hostname because launched tokens already point to these public URIs.

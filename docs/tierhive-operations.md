@@ -6,9 +6,13 @@ This protects the live devnet trial. The production hostname is `https://devnet.
 
 - `toluva-monitor.timer` runs every 15 minutes on the VPS. It checks the internal web/API route, nonempty registry, fresh on-chain status for every DBC launch, the published JSON and artwork behind hosted metadata links, and disk usage. A failure makes `toluva-monitor.service` failed and writes a plain problem to the system journal. This internal check does **not** verify external DNS or HTTPS.
 - `toluva-backup.timer` runs daily at 02:15 UTC. It creates a restricted archive of `registry/registry.json` and all metadata assets under `/var/backups/toluva`. `data-backup.py` checks the registry JSON, every content-addressed asset's hash, and hosted metadata references before publishing the archive and its SHA-256 manifest. Backups are retained until an operator reviews a retention policy.
-- Pull the latest archive to a separate machine with `deploy/tierhive/pull-offsite-backup.sh SSH_TARGET SSH_PORT [DESTINATION]`. The script verifies the downloaded archive against its checksum. A backup stored only on the VPS does not protect against loss of that VPS.
+- On an awake Mac, `com.toluva.offsite-backup` pulls the latest archive every six hours into `~/Library/Application Support/Toluva/backups` and verifies its checksum. `com.toluva.external-monitor` checks public HTTPS every 30 minutes and gives a desktop notification when health changes. The latter complements the VPS's internal check: it can detect DNS, TLS, or proxy outages. These Mac jobs do not run while the computer is shut down, so they are an extra devnet safeguard, not a 24/7 production monitor.
+
+To reinstall or move the Mac jobs, run `python3 deploy/tierhive/install-mac-watch.py SSH_TARGET SSH_PORT` from the repo. This copies the helpers into `~/Library/Application Support/Toluva` so macOS privacy controls do not block a background job from reading Documents. The standalone `deploy/tierhive/pull-offsite-backup.sh SSH_TARGET SSH_PORT [DESTINATION]` command can also be run manually. A backup stored only on the VPS does not protect against loss of that VPS.
 
 On the VPS, inspect the latest results with `systemctl status toluva-monitor.service toluva-backup.service` and `journalctl -u toluva-monitor.service -u toluva-backup.service --since today`. Verify a downloaded archive with `python3 deploy/tierhive/data-backup.py verify PATH_TO_ARCHIVE`.
+
+On the Mac, inspect `~/Library/Logs/com.toluva.offsite-backup.log` and `~/Library/Logs/com.toluva.external-monitor.log`. The external check reads the public `/api/health`, `/api/registry`, hosted metadata and artwork, and checks that DBC pool reads are fresh. It notifies on a healthy-to-failed or failed-to-healthy change, not on every successful run.
 
 ## Recovery drill
 
