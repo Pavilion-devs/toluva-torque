@@ -38,7 +38,7 @@ The optional verification base makes the API read each newly stored asset throug
 
 1. The web container can reach `/api/health` and the seeded registry through its proxy.
 2. From outside the VPS, the HTTPS origin serves the React app and `/api/health`, and `/api/registry` returns the three existing devnet launches, including Toluva Genesis.
-3. `/api/meteora/conviction-proof?pool=DFxmgj3i6rRsf1p13FxuvKELZ3Ktk5MVGLNcKPu8Kbaa` retains the pilot's first persisted checkpoint and 1/2 score. Do not start a fresh v2 window by losing the registry file.
+3. `/api/meteora/conviction-proof?pool=DFxmgj3i6rRsf1p13FxuvKELZ3Ktk5MVGLNcKPu8Kbaa` retains both persisted creator-wallet checkpoints and the 2/2 unfunded proof score. Do not lose either observation by replacing the registry file.
 4. `/api/meteora/metadata/status` reports local persistent storage. Publish a small wallet-approved metadata item through the normal form and verify its HTTPS JSON and image URLs before creating a token that points to them.
 5. Confirm wallet connection and devnet quote reads in a browser. Keep the prior Toluva site untouched until this devnet trial is verified.
 
