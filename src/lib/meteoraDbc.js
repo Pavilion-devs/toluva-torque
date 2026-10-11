@@ -1,6 +1,7 @@
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { getInjectedWalletProvider } from "./walletAdapter";
 import { postJson } from "./toluvaApi";
+import { signAndSendWalletTransaction } from "./solanaTransactionFlow";
 
 const DEVNET_RPC = "https://api.devnet.solana.com";
 const DBC_PROGRAM = new PublicKey("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
@@ -66,16 +67,9 @@ function assertBuiltTransaction(transaction, walletAddress, extraSigner) {
 async function signAndSend(connection, provider, walletAddress, built, extraSigner) {
   const transaction = transactionFromBase64(built.transaction);
   assertBuiltTransaction(transaction, walletAddress, extraSigner);
-  transaction.partialSign(extraSigner);
-  const signed = await provider.signTransaction(transaction);
-  const signature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 3, skipPreflight: false });
-  const confirmation = await connection.confirmTransaction({
-    signature,
-    blockhash: built.blockhash,
-    lastValidBlockHeight: built.lastValidBlockHeight,
-  }, "confirmed");
-  if (confirmation.value.err) throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-  return signature;
+  return signAndSendWalletTransaction({
+    connection, provider, transaction, extraSigners: [extraSigner],
+  });
 }
 
 export async function launchMeteoraToken({ wallet, launch, configAddress, onConfigConfirmed, onPoolConfirmed, onStage }) {
@@ -170,15 +164,8 @@ export async function tradeMeteoraToken({ wallet, reviewedQuote }) {
       || !transaction.instructions.some(({ programId }) => programId.equals(DBC_PROGRAM))) {
     throw new Error("Trade transaction does not match your wallet and DBC pool.");
   }
-  const signed = await provider.signTransaction(transaction);
   const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || DEVNET_RPC, "confirmed");
-  const signature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 3, skipPreflight: false });
-  const confirmation = await connection.confirmTransaction({
-    signature,
-    blockhash: built.blockhash,
-    lastValidBlockHeight: built.lastValidBlockHeight,
-  }, "confirmed");
-  if (confirmation.value.err) throw new Error(`Trade failed: ${JSON.stringify(confirmation.value.err)}`);
+  const signature = await signAndSendWalletTransaction({ connection, provider, transaction });
   return { signature, quote: built.quote };
 }
 
@@ -211,15 +198,11 @@ export async function migrateMeteoraPool({ wallet, status }) {
       || !built.positionNftMints.every((mint) => transaction.signatures.some(({ publicKey, signature }) => publicKey.toBase58() === mint && signature))) {
     throw new Error("Migration transaction differs from the reviewed pool and signer accounts.");
   }
-  const signed = await provider.signTransaction(transaction);
-  if (!signed.verifySignatures()) throw new Error("The wallet did not preserve all required migration signatures.");
   const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || DEVNET_RPC, "confirmed");
-  const signature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 3, skipPreflight: false });
-  const confirmation = await connection.confirmTransaction({
-    signature,
-    blockhash: built.blockhash,
+  const signature = await signAndSendWalletTransaction({
+    connection, provider, transaction,
     lastValidBlockHeight: built.lastValidBlockHeight,
-  }, "confirmed");
-  if (confirmation.value.err) throw new Error(`Migration failed: ${JSON.stringify(confirmation.value.err)}`);
+    refreshBlockhash: false,
+  });
   return { signature, dammPool: built.dammPool, positionNftMints: built.positionNftMints };
 }

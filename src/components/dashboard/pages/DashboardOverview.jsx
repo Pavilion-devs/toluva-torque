@@ -2,6 +2,7 @@ import React from "react";
 import Link from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import { useRegistry } from "../../../lib/launchRegistry";
+import { friendlyError } from "../../../lib/userErrors";
 
 const lamportsPerSol = 1_000_000_000;
 
@@ -232,7 +233,7 @@ export default function DashboardOverview() {
 
   return (
     <div className="page">
-      {error && <div className="card" style={{ marginBottom: 16, padding: 14, color: "#9f1239" }}>Launch data is unavailable: {error}</div>}
+      {error && <div className="card" style={{ marginBottom: 16, padding: 14, color: "#9f1239" }}>{friendlyError(error, "data")}</div>}
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>

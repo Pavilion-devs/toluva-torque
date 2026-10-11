@@ -4,6 +4,7 @@ import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { getLaunchFilters, refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
 import { getJson } from "../../../lib/toluvaApi";
+import { friendlyError } from "../../../lib/userErrors";
 
 const statusMap = {
   bonding:   { label: "Bonding",   pill: "progress"  },
@@ -418,7 +419,8 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
     } catch (err) {
       setState({
         status: "error",
-        error: err instanceof Error ? err.message : "Launch failed.",
+        error: friendlyError(err, "launch"),
+        errorSignature: err?.signature || null,
         result: null,
         stage: null,
       });
@@ -521,7 +523,10 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
         </Banner>
       )}
       {state.error && (
-        <Banner tone="rose" style={{ marginTop: 16 }}>{state.error}</Banner>
+        <Banner tone="rose" style={{ marginTop: 16 }}>
+          {state.error}
+          {state.errorSignature && <div style={{ marginTop: 5 }}><a href={`https://explorer.solana.com/tx/${state.errorSignature}?cluster=devnet`} target="_blank" rel="noreferrer">Check transaction status ↗</a></div>}
+        </Banner>
       )}
       {state.result && (
         <Banner tone="emerald" style={{ marginTop: 16 }}>
@@ -779,7 +784,7 @@ export default function LaunchesPage() {
         </div>
       </div>
 
-      {error && <Banner tone="rose" style={{ marginBottom: 16 }}>Launch data is unavailable: {error}</Banner>}
+      {error && <Banner tone="rose" style={{ marginBottom: 16 }}>{friendlyError(error, "data")}</Banner>}
 
       {showLaunchModal && (
         <Modal onClose={() => setShowLaunchModal(false)}>

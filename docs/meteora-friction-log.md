@@ -19,3 +19,10 @@ These are issues encountered during the Toluva devnet build and normal wallet fl
 ![Recovered devnet pool status and fresh 0.001 SOL buy quote](meteora-rpc-recovered.png)
 
 The first wallet-signed DBC buy succeeded after RPC access was restored. Its transaction and received token balance are recorded in the [proof record](meteora-proof.md).
+
+## Pool transaction expired during wallet approval
+
+- **Symptom:** The first Toluva Genesis pool attempt showed a raw simulation error ending in `Blockhash not found`. Metadata publication and config creation had already succeeded; the pool had not been created.
+- **Root cause:** The API attached a recent Solana blockhash while building an unsigned transaction. The browser then waited for the user's wallet approval before submitting it. That elapsed time could exhaust the blockhash validity window. A public RPC load balancer can also return a node that has not caught up to the node that supplied the blockhash. The error came from transaction freshness, not token metadata or config economics.
+- **Recovery observed:** The existing resume path kept the confirmed config and metadata, built a new pool transaction, and the user's second approval finalized the launch. The addresses and signature are in the [proof record](meteora-proof.md).
+- **Fix:** For unsigned config, pool and trade transactions, the browser now fetches a blockhash immediately before wallet signing, submits with a minimum context slot, and checks expiry after signing. Migration retains its original blockhash because the API has already applied required NFT signer signatures. Network failures after submission keep the signed transaction ID available so a user can check its status before retrying. Public launch, trade, wallet and chain-read errors are translated into plain language; technical details remain available in developer tools and API logs. Automated tests cover the signing and expiry paths. A further live wallet test is still needed to validate this change in the deployed product.

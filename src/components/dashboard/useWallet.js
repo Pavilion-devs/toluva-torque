@@ -5,6 +5,7 @@ import {
   getConnectedInjectedWallet,
   shortenAddress,
 } from "../../lib/walletAdapter";
+import { friendlyError } from "../../lib/userErrors";
 
 let walletState = {
   address: null,
@@ -55,7 +56,7 @@ export default function useWallet() {
       .catch((error) => {
         setWalletState({
           connecting: false,
-          error: error instanceof Error ? error.message : "Wallet connection failed.",
+          error: friendlyError(error, "wallet"),
         });
       });
   }, []);

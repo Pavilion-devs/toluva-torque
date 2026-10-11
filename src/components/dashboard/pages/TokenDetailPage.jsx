@@ -4,6 +4,7 @@ import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
 import { getJson, postJson } from "../../../lib/toluvaApi";
+import { friendlyError } from "../../../lib/userErrors";
 
 const BUY_PRESETS_SOL  = ["0.01", "0.05", "0.1", "0.5"];
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -517,6 +518,7 @@ function MeteoraTradeCard({ launch }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [signature, setSignature] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
   const [pendingProofs, setPendingProofs] = React.useState(() => pendingDbcProofs(launch.dbc.pool));
   const [proofError, setProofError] = React.useState(null);
   const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
@@ -544,7 +546,7 @@ function MeteoraTradeCard({ launch }) {
           setProofError(null);
           await refreshRegistry({ force: true });
         } catch (cause) {
-          if (active) setProofError(cause.message || "Activity verification is pending.");
+          if (active) setProofError(friendlyError(cause, "data"));
         }
       }
       processing = false;
@@ -565,7 +567,7 @@ function MeteoraTradeCard({ launch }) {
     const params = new URLSearchParams({ pool: launch.dbc.pool, direction, amount, slippageBps: String(slippageBps) });
     getJson(`/api/meteora/swap/quote?${params}`)
       .then((result) => { if (active) setQuote(result.quote); })
-      .catch((cause) => { if (active) setError(cause.message || "Unable to quote this trade."); })
+      .catch((cause) => { if (active) setError(friendlyError(cause, "quote")); })
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested, reviewVersion, canTrade]);
@@ -573,11 +575,11 @@ function MeteoraTradeCard({ launch }) {
   function updateDirection(value) { setDirection(value); setReviewRequested(false); }
   function updateAmount(value) { setAmount(value); setReviewRequested(false); }
   function updateSlippage(value) { setSlippageBps(value); setReviewRequested(false); }
-  function review() { setReviewRequested(true); setReviewVersion((version) => version + 1); }
+  function review() { setPendingSignature(null); setReviewRequested(true); setReviewVersion((version) => version + 1); }
 
   async function trade() {
     if (!quote) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setPendingSignature(null);
     try {
       const { tradeMeteoraToken } = await import("../../../lib/meteoraDbc");
       const result = await tradeMeteoraToken({ wallet, reviewedQuote: quote });
@@ -588,7 +590,12 @@ function MeteoraTradeCard({ launch }) {
       setAmount("");
       await refreshRegistry({ force: true });
     } catch (cause) {
-      setError(cause.message || "Trade failed.");
+      setError(friendlyError(cause, "trade"));
+      setPendingSignature(cause?.signature || null);
+      if (cause?.code === "BLOCKHASH_EXPIRED" || cause?.code === "CONFIRMATION_UNKNOWN" || /blockhash not found/i.test(cause?.message || "")) {
+        setQuote(null);
+        setReviewRequested(false);
+      }
     } finally { setBusy(false); }
   }
 
@@ -618,6 +625,7 @@ function MeteoraTradeCard({ launch }) {
         <div style={{ color: "var(--muted)" }}>The transaction will fail if the minimum cannot be met. Network and token account costs may also apply.</div>
       </div>}
       {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {pendingSignature && <a href={`https://explorer.solana.com/tx/${pendingSignature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
       {wallet.error && <div style={{ color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
       {signature && <a href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed trade {shortAddress(signature)} ↗</a>}
       {pendingProofs.length > 0 && <div style={{ color: "var(--ink-dim)", fontSize: 12 }}>Checking {pendingProofs.length} confirmed trade{pendingProofs.length === 1 ? "" : "s"} for finalized activity. {proofError || ""}</div>}
@@ -638,7 +646,7 @@ function DbcActivityCard({ launch, explorer }) {
         <h3 style={{ margin: 0 }}>Verified DBC activity</h3>
         <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Finalized swaps submitted to Toluva and checked against this pool on chain.</div>
       </div>
-      {activity?.error ? <div style={{ color: "#9f1239", fontSize: 12 }}>{activity.error}</div> : <>
+      {activity?.error ? <div style={{ color: "#9f1239", fontSize: 12 }}>{friendlyError(activity.error, "data")}</div> : <>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <StatTile label="Tracked buyers" value={`${activity?.trackedBuyers ?? 0}${activity?.complete === false ? "+" : ""}`} />
           <StatTile label="Verified buys" value={`${activity?.trackedBuys ?? 0}${activity?.complete === false ? "+" : ""}`} />
@@ -664,7 +672,7 @@ function ConvictionProofCard({ launch, explorer }) {
       try {
         const result = await getJson(`/api/meteora/conviction-proof?pool=${encodeURIComponent(launch.dbc.pool)}`);
         if (active) { setProof(result.proof); setError(null); }
-      } catch (cause) { if (active) setError(cause.message || "Conviction proof is unavailable."); }
+      } catch (cause) { if (active) setError(friendlyError(cause, "data")); }
     }
     refresh();
     const timer = window.setInterval(refresh, 30000);
@@ -717,6 +725,7 @@ function MeteoraMigrationCard({ launch, explorer }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [signature, setSignature] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
   const fresh = !launch.dbc.liveStale && !launch.dbc.liveError;
   const ready = fresh && chain?.migrationReady;
   const stageText = {
@@ -729,14 +738,15 @@ function MeteoraMigrationCard({ launch, explorer }) {
   }[chain?.migrationStage] || "Waiting for chain status";
 
   async function migrate() {
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setPendingSignature(null);
     try {
       const { migrateMeteoraPool } = await import("../../../lib/meteoraDbc");
       const result = await migrateMeteoraPool({ wallet, status: chain });
       setSignature(result.signature);
       await refreshRegistry({ force: true });
     } catch (cause) {
-      setError(cause.message || "Migration failed.");
+      setError(friendlyError(cause, "migration"));
+      setPendingSignature(cause?.signature || null);
     } finally { setBusy(false); }
   }
 
@@ -763,19 +773,20 @@ function MeteoraMigrationCard({ launch, explorer }) {
         {damm.positions.map((position, index) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12, lineHeight: 1.7 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><strong>Position {index + 1}</strong><a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.address)} ↗</a></div>
           {position.nftHolder && <div style={{ color: "var(--muted)" }}>NFT holder: <a href={explorer("address", position.nftHolder)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.nftHolder)} ↗</a></div>}
-          {position.ownerError && <div style={{ color: "#9f1239" }}>NFT holder could not be verified: {position.ownerError}</div>}
+          {position.ownerError && <div style={{ color: "#9f1239" }}>NFT holder is temporarily unavailable. {friendlyError(position.ownerError, "data")}</div>}
           <div style={{ color: "var(--muted)" }}>Unlocked liquidity: {position.unlockedLiquidity} units</div>
           <div style={{ color: "var(--muted)" }}>Vested liquidity: {position.vestedLiquidity} units</div>
           <div style={{ color: "var(--muted)" }}>Permanently locked liquidity: {position.permanentLockedLiquidity} units</div>
           <div style={{ color: "var(--muted)" }}>Pending fees: {position.pendingBaseFee} {launch.dbc.symbol} · {position.pendingQuoteFee} SOL</div>
           <a href={explorer("address", position.nftMint)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position NFT {shortAddress(position.nftMint)} ↗</a>
         </div>)}
-        {damm.positionError && <div style={{ color: "#9f1239", fontSize: 12 }}>Position accounts could not be read: {damm.positionError}</div>}
+        {damm.positionError && <div style={{ color: "#9f1239", fontSize: 12 }}>Positions are temporarily unavailable. {friendlyError(damm.positionError, "data")}</div>}
       </>}
       {fresh && chain?.migrationStage === "bonding" && <div style={{ fontSize: 12, color: "var(--muted)" }}>Trading continues on DBC until the on-chain graduation target is reached.</div>}
       {fresh && chain?.lockedVesting && chain?.migrationStage !== "created-pool" && <div style={{ fontSize: 12, color: "var(--muted)" }}>This pool requires a vesting locker before migration. Manual migration here supports launches without locked vesting.</div>}
       {ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Meteora may migrate this pool automatically. If it remains pending, a connected wallet can submit the migration and pay the network costs.</div>}
       {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {pendingSignature && <a href={explorer("tx", pendingSignature)} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
       {signature && <a href={explorer("tx", signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed migration {shortAddress(signature)} ↗</a>}
       {ready && <button type="button" className="btn primary" disabled={busy} onClick={wallet.connected ? migrate : wallet.connect}>{busy ? "Signing migration…" : wallet.connected ? "Migrate to DAMM v2" : "Connect wallet to migrate"}</button>}
       {!fresh && <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Refresh chain status</button>}
@@ -808,7 +819,7 @@ function MeteoraTokenDetailPage({ launch }) {
       </div>
 
       {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <span>{dbc.liveError}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
+        <span>{friendlyError(dbc.liveError, "data")}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
         <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
       </div>}
 
