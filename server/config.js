@@ -113,7 +113,7 @@ export function integrationReadiness() {
     },
     solana: {
       cluster: config.solana.cluster,
-      rpcUrl: config.solana.rpcUrl,
+      rpcConfigured: Boolean(config.solana.rpcUrl),
       commitment: config.solana.commitment,
       statusTimeoutMs: config.solana.statusTimeoutMs,
     },
