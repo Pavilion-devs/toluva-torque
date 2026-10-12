@@ -909,6 +909,11 @@ function DlmmLiquidityCard({ launch, explorer }) {
           <StatTile label="Bin step" value={`${status.binStep} bps`} />
           <StatTile label="Your positions" value={wallet.connected ? String(status.positions.length) : "Connect wallet"} />
         </div>
+        <div style={{ padding: 12, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.6 }}>
+          <strong>Liquidity in this pool now</strong>
+          <div>{displayUnits(status.tokenXReserve, 6)} {launch.dbc.symbol} + {displayUnits(status.tokenYReserve, 9)} SOL</div>
+          <div style={{ color: "var(--muted)" }}>These amounts change when people trade or withdraw.</div>
+        </div>
         {wallet.connected && status.positions.map((position) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 9, fontSize: 12, display: "grid", gap: 5 }}>
           <a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position {shortAddress(position.address)} ↗</a>
           <div style={{ color: "var(--muted)" }}>Bin range {position.lowerBinId} to {position.upperBinId}</div>
