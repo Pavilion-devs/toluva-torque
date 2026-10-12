@@ -3,6 +3,7 @@ import Link from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import { useRegistry } from "../../../lib/launchRegistry";
 import { friendlyError } from "../../../lib/userErrors";
+import { graduated, migrationSpotlight, sevenDayTradeVolume, verifiedDbcTrades } from "../../../lib/dashboardMetrics";
 
 const lamportsPerSol = 1_000_000_000;
 
@@ -126,47 +127,21 @@ function poolTargetSol(launch) {
   return numeric(pool?.totalFundRaisingB) / lamportsPerSol;
 }
 
-function eventAmountSol(event) {
-  const raw = numeric(event?.payload?.amount ?? event?.torqueRequest?.data?.amount);
-  return raw >= 1_000_000 ? raw / lamportsPerSol : raw;
-}
-
-function torqueStatus(event) {
-  return event?.torqueReceipt?.status || (event?.status === "emitted" ? "ACCEPTED" : event?.status || "recorded");
-}
-
-function EmptyCard({ title, detail }) {
-  return (
-    <div style={{ padding: 28, color: "var(--ink-dim)" }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{title}</div>
-      <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>{detail}</div>
-    </div>
-  );
-}
-
-function ActivityRow({ event, now }) {
-  const status = torqueStatus(event);
-  const isAccepted = status === "ACCEPTED";
-  const txSignature = event?.payload?.txSignature || event?.torqueRequest?.data?.tx_signature;
-  const amount = event.type === "buy_completed" || event.type === "first_buy_completed" ? formatSol(eventAmountSol(event)) : null;
-
+function ActivityRow({ trade, now }) {
   return (
     <div className="team-row">
-      <div className="t-avatar a1">{String(event.type || "EV").slice(0, 2).toUpperCase()}</div>
+      <div className={`t-avatar ${trade.direction === "buy" ? "a1" : "a2"}`}>{trade.direction === "buy" ? "B" : "S"}</div>
       <div className="t-body">
-        <div className="t-name">{String(event.type || "event").replaceAll("_", " ")}</div>
+        <div className="t-name">{trade.direction === "buy" ? "Buy" : "Sell"} · {trade.symbol}</div>
         <div className="t-task">
-          {event.token ? <b>{String(event.token).toUpperCase()}</b> : "No token"} · {formatRelative(event.createdAt, now)}
+          {formatRelative(trade.createdAt, now)} · wallet {shortAddress(trade.wallet)}
         </div>
         <div className="t-extra">
-          {amount ? <span>{amount}</span> : null}
-          {txSignature ? <span className="mono">{shortAddress(txSignature)}</span> : null}
-          {event.torqueReceipt?.ingestionId ? <span className="mono">{shortAddress(event.torqueReceipt.ingestionId)}</span> : null}
+          <span>{formatSol(trade.amountSol)} traded</span>
+          <a href={`https://explorer.solana.com/tx/${encodeURIComponent(trade.signature)}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 11.5 }}>View transaction ↗</a>
         </div>
       </div>
-      <span className={`status-pill ${isAccepted ? "completed" : "pending"}`}>
-        {status.toLowerCase()}
-      </span>
+      <span className="status-pill completed">verified</span>
     </div>
   );
 }
@@ -181,13 +156,11 @@ export default function DashboardOverview() {
   }, []);
 
   const launches = registry.launches || [];
-  const events = registry.eventReceipts || [];
   const meteoraLaunches = launches.filter((launch) => launch.dbc?.pool);
   const liveMeteoraLaunches = meteoraLaunches.filter((launch) => launch.dbc?.liveStatus);
-  const verifiedDbcEvents = events.filter((event) => event.status === "verified" && event.verification?.source === "solana_rpc" && event.payload?.protocol === "meteora_dbc");
-  const buyEvents = verifiedDbcEvents.filter((event) => event.type === "buy_completed" || event.type === "first_buy_completed");
-  const totalBuySol = buyEvents.reduce((total, event) => total + eventAmountSol(event), 0);
-  const migrationLaunch = meteoraLaunches[0] || null;
+  const verifiedTrades = verifiedDbcTrades(registry);
+  const { days: sevenDayWindow, totalSol: sevenDaySol, tradeCount: sevenDayCount } = sevenDayTradeVolume(verifiedTrades, now);
+  const migrationLaunch = migrationSpotlight(meteoraLaunches);
   const migrationProgress = poolProgress(migrationLaunch);
   const visibleMigrationProgress = migrationProgress > 0 ? Math.max(0.8, Math.min(100, migrationProgress)) : 0;
   const raisedSol = poolRaisedSol(migrationLaunch);
@@ -216,19 +189,7 @@ export default function DashboardOverview() {
       ? "rgba(130, 230, 170, 0.95)"
       : "rgba(255, 195, 120, 0.9)";
   const visibleLaunches = meteoraLaunches.slice(0, 5);
-  const visibleEvents = verifiedDbcEvents.slice(0, 5);
-  const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
-  const volumeMap = buyEvents.reduce((map, event) => {
-    const date = parseDate(event.createdAt)?.toISOString().slice(0, 10);
-    if (date) map[date] = (map[date] || 0) + eventAmountSol(event);
-    return map;
-  }, {});
-  const sevenDayWindow = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now);
-    d.setDate(now.getDate() - (6 - i));
-    const key = d.toISOString().slice(0, 10);
-    return { date: key, value: volumeMap[key] || 0, dayLabel: DAY_LABELS[d.getDay()] };
-  });
+  const visibleEvents = verifiedTrades.slice(0, 5);
   const maxVolume = Math.max(...sevenDayWindow.map((p) => p.value), 0);
 
   return (
@@ -279,7 +240,7 @@ export default function DashboardOverview() {
               <svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           </div>
-          <div className="stat-value">{meteoraLaunches.filter((launch) => launch.dbc?.liveStatus?.migrationProgress === 3).length}</div>
+          <div className="stat-value">{meteoraLaunches.filter(graduated).length}</div>
           <div className="stat-foot">Completed migrations</div>
         </div>
 
@@ -297,20 +258,14 @@ export default function DashboardOverview() {
         <div className="card c-analytics">
           <div className="analytics-head">
             <h3>Verified DBC trade volume · last 7 days</h3>
-            <div className="menu" style={{ marginLeft: "auto", color: "var(--muted)", cursor: "pointer", padding: "6px 8px", borderRadius: 8 }}>
-              <svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <circle cx="5" cy="12" r="1.6" fill="currentColor" />
-                <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-                <circle cx="19" cy="12" r="1.6" fill="currentColor" />
-              </svg>
-            </div>
+            <div className="analytics-total">{sevenDayCount} verified trade{sevenDayCount === 1 ? "" : "s"}</div>
           </div>
           <div className="chart">
             {sevenDayWindow.map((point) => (
               <div className="bar-wrap" key={point.date}>
                 <div
                   className={`bar${point.value > 0 ? " on" : ""}`}
-                  style={{ height: `${point.value > 0 ? Math.max(10, Math.round((point.value / Math.max(maxVolume, 1)) * 100)) : 14}%` }}
+                  style={{ height: `${point.value > 0 ? Math.max(10, Math.round((point.value / maxVolume) * 100)) : 14}%` }}
                 >
                   {point.value === maxVolume && maxVolume > 0 ? <div className="peak-label">{formatSol(point.value)}</div> : null}
                 </div>
@@ -319,7 +274,7 @@ export default function DashboardOverview() {
             ))}
           </div>
           <div style={{ padding: "0 4px 4px", fontSize: 12, color: "var(--ink-dim)", letterSpacing: "-0.01em" }}>
-            {buyEvents.length ? `${formatSol(totalBuySol)} total this week` : "Trade verification will populate this chart."}
+            {sevenDayCount ? `${formatSol(sevenDaySol)} across ${sevenDayCount} verified trade${sevenDayCount === 1 ? "" : "s"} in the last 7 days` : "No verified DBC trades in the last 7 days."}
           </div>
         </div>
 
@@ -328,12 +283,12 @@ export default function DashboardOverview() {
             <h4>Next milestone</h4>
           </div>
           <div className="rem-title">
-            {migrationLaunch ? "Move toward migration" : "No active launch yet"}
+            {migrationLaunch ? graduated(migrationLaunch) ? "All launches graduated" : "Move toward migration" : meteoraLaunches.length ? "Checking pool progress" : "No active launch yet"}
           </div>
           <div className="rem-time">
             {migrationLaunch
               ? `${migrationLaunch.dbc.symbol} · ${formatSol(raisedSol)} raised of ${formatSol(targetSol)}`
-              : "Create a devnet Meteora DBC token"}
+              : meteoraLaunches.length ? "Live chain status is temporarily unavailable" : "Create a devnet Meteora DBC token"}
           </div>
           <Link href="/launches" className="rem-btn">
             Open launches
@@ -357,7 +312,7 @@ export default function DashboardOverview() {
                 <div className="p-body">
                   <div className="p-name">{launch.dbc?.symbol || launch.sym}</div>
                   <div className="p-meta">
-                    {launch.dbc?.pool ? `${formatPct(poolProgress(launch))} toward migration` : launch.status}
+                    {graduated(launch) ? "Graduated to DAMM v2" : `${formatPct(poolProgress(launch))} toward migration`}
                   </div>
                 </div>
               </div>
@@ -373,11 +328,11 @@ export default function DashboardOverview() {
             <h3>Recent activity</h3>
           </div>
           <div className="team-list">
-            {visibleEvents.map((event) => (
-              <ActivityRow key={event.id} event={event} now={now} />
+            {visibleEvents.map((trade) => (
+              <ActivityRow key={trade.id} trade={trade} now={now} />
             ))}
             {visibleEvents.length === 0 && (
-              <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>No verified DBC activity yet.</div>
+              <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>No verified DBC trades yet.</div>
             )}
           </div>
         </div>
@@ -408,12 +363,18 @@ export default function DashboardOverview() {
             </svg>
             <div className="gauge-value">
               <div className="pct">{formatPct(migrationProgress)}</div>
-              <div className="lbl">{migrationLaunch ? `${migrationLaunch.dbc.symbol} live pool` : "No pool yet"}</div>
+              <div className="lbl">{migrationLaunch ? `${migrationLaunch.dbc.symbol} ${graduated(migrationLaunch) ? "graduated" : "active curve"}` : "No readable pool yet"}</div>
             </div>
           </div>
           <div className="gauge-legend">
             <span className="lg"><span className="sw c" />{formatSol(raisedSol)} raised</span>
             <span className="lg"><span className="sw p" />{formatSol(targetSol)} target</span>
+          </div>
+          <div style={{ borderTop: "1px solid var(--line)", marginTop: 18, paddingTop: 12, display: "grid", gap: 8 }}>
+            {meteoraLaunches.map((launch) => <Link key={launch.sym} href={`/launches/${encodeURIComponent(launch.sym)}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: "var(--ink-dim)", textDecoration: "none" }}>
+              <strong style={{ color: "var(--ink)" }}>{launch.dbc.symbol}</strong>
+              <span>{graduated(launch) ? "Graduated" : launch.dbc.liveStatus ? `${formatPct(poolProgress(launch))} of target` : "Checking chain"}</span>
+            </Link>)}
           </div>
         </div>
 
