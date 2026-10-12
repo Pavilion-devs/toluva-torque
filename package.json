@@ -16,6 +16,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@meteora-ag/dlmm": "1.9.14",
     "@meteora-ag/dynamic-bonding-curve-sdk": "1.5.13",
     "@raydium-io/raydium-sdk-v2": "^0.2.41-alpha",
     "@solana/spl-token": "^0.4.14",

@@ -210,6 +210,8 @@ These are ordered by dependency, not by a deadline. Do not expand scope until th
 
 **Implementation 2026-10-11:** [Conviction checkpoints v2](docs/conviction-checkpoints-v2.md) stores an immutable finalized entry balance and a follow-up at least 24 chain hours later, scores both against a fixed policy, and exposes a public per-wallet evidence trail. A five-minute server sampler makes observations while the API runs; page reads also trigger sampling. Trade and balance evidence is isolated by exact pool and mint. Tests cover two wallets, replayed buys, unverified event ingestion, wrong policy, and early follow-up. The live creator-wallet pilot recorded both checkpoints 86,423 chain seconds apart and scored 2/2 under the unfunded proof policy. Independent wallet participation is still required for the M3 exit.
 
+**Post-graduation liquidity pilot 2026-10-12:** [Conviction liquidity v1](docs/dlmm-liquidity-v1.md) adds an opt-in Meteora DLMM pool linked to the verified DAMM v2 price, creator-signed pool registration, wallet-owned positions and a full withdrawal path. The pool-creation transaction was built and simulated on devnet, and the local UI and automated tests pass. Signed creation, deposit and withdrawal remain the release proof gate; this is not yet evidence of an active DLMM market or independent use.
+
 ### M4 — Reward distribution, if supported
 
 - Follow the [Conviction funding and claim gate](docs/conviction-rewards-plan.md); keep the current proof-only status until the full budget and claim path verify on chain.

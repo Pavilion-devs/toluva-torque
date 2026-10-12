@@ -367,6 +367,7 @@ export async function getPoolStatus(poolAddress) {
     dammV2.tokenAMint = migrated.tokenAMint.toBase58();
     dammV2.tokenBMint = migrated.tokenBMint.toBase58();
     dammV2.liquidity = migrated.liquidity.toString();
+    dammV2.sqrtPrice = migrated.sqrtPrice.toString();
     dammV2.permanentLockLiquidity = migrated.permanentLockLiquidity.toString();
     dammV2.tokenAAmount = migrated.tokenAAmount.toString();
     dammV2.tokenBAmount = migrated.tokenBAmount.toString();

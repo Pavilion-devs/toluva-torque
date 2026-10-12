@@ -744,6 +744,209 @@ function ConvictionProofCard({ launch, explorer }) {
   </div>;
 }
 
+function DlmmLiquidityCard({ launch, explorer }) {
+  function displayUnits(raw, decimals) {
+    try {
+      const units = BigInt(raw || "0");
+      const divisor = 10n ** BigInt(decimals);
+      const fractional = String(units % divisor).padStart(decimals, "0").replace(/0+$/, "");
+      return `${units / divisor}${fractional ? `.${fractional}` : ""}`;
+    } catch { return "—"; }
+  }
+  const wallet = useWallet();
+  const [plan, setPlan] = React.useState(null);
+  const [status, setStatus] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [stage, setStage] = React.useState(null);
+  const [receipt, setReceipt] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
+  const [baseAmount, setBaseAmount] = React.useState("");
+  const [quoteAmount, setQuoteAmount] = React.useState("");
+  const [review, setReview] = React.useState(null);
+  const [withdrawalReview, setWithdrawalReview] = React.useState(null);
+  const preparedPosition = React.useRef(null);
+  const preparedWithdrawal = React.useRef(null);
+  const linkedPool = launch.dbc.dlmm?.pool;
+  const isCreator = wallet.address === launch.creator;
+
+  const refresh = React.useCallback(async () => {
+    try {
+      if (linkedPool) {
+        const result = await getJson(`/api/meteora/dlmm/status?dbcPool=${encodeURIComponent(launch.dbc.pool)}${wallet.address ? `&wallet=${encodeURIComponent(wallet.address)}` : ""}`);
+        setStatus(result.status);
+      } else {
+        const result = await getJson(`/api/meteora/dlmm/plan?dbcPool=${encodeURIComponent(launch.dbc.pool)}`);
+        setPlan(result.plan);
+      }
+      setError(null);
+    } catch (cause) { setError(friendlyError(cause, "data")); }
+  }, [launch.dbc.pool, linkedPool, wallet.address]);
+
+  React.useEffect(() => {
+    let active = true;
+    refresh();
+    const timer = window.setInterval(() => { if (active && !busy) refresh(); }, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [refresh, busy]);
+
+  async function createOrLink() {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    try {
+      const { createAndLinkDlmmPool, linkExistingDlmmPool } = await import("../../../lib/meteoraDlmm");
+      const result = plan.exists
+        ? await linkExistingDlmmPool({ wallet, dbcPool: launch.dbc.pool, dlmmPool: plan.address, onStage: setStage })
+        : await createAndLinkDlmmPool({ wallet, dbcPool: launch.dbc.pool, onStage: setStage });
+      setReceipt(result.signature ? { signature: result.signature, label: "DLMM pool created" } : null);
+      await refreshRegistry({ force: true });
+      await refresh();
+    } catch (cause) { await refresh(); setError(friendlyError(cause, "launch")); setPendingSignature(cause?.signature || null); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function reviewPosition() {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    setReview(null); preparedPosition.current = null;
+    try {
+      const { prepareDlmmLiquidity } = await import("../../../lib/meteoraDlmm");
+      const prepared = await prepareDlmmLiquidity({
+        wallet, dbcPool: launch.dbc.pool, dlmmPool: linkedPool,
+        baseAmount: baseAmount.trim(), quoteAmount: quoteAmount.trim(), onStage: setStage,
+      });
+      preparedPosition.current = prepared;
+      setReview({ baseAmount: prepared.baseAmount, quoteAmount: prepared.quoteAmount,
+        minBinId: prepared.minBinId, maxBinId: prepared.maxBinId });
+    } catch (cause) { setError(friendlyError(cause, "liquidity")); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function signPosition() {
+    if (!preparedPosition.current) return;
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { signPreparedDlmmLiquidity } = await import("../../../lib/meteoraDlmm");
+      const result = await signPreparedDlmmLiquidity({ wallet, prepared: preparedPosition.current, onStage: setStage });
+      setReceipt({ signature: result.signature, label: "Liquidity position confirmed" });
+      setBaseAmount(""); setQuoteAmount("");
+      setReview(null); preparedPosition.current = null;
+      await refresh();
+    } catch (cause) {
+      setError(friendlyError(cause, "liquidity")); setPendingSignature(cause?.signature || null);
+      if (cause?.signature) { setReview(null); preparedPosition.current = null; }
+    }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function reviewWithdrawal(position) {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    setWithdrawalReview(null); preparedWithdrawal.current = null;
+    try {
+      const { prepareDlmmWithdrawal } = await import("../../../lib/meteoraDlmm");
+      const prepared = await prepareDlmmWithdrawal({
+        wallet, dbcPool: launch.dbc.pool, dlmmPool: linkedPool, position: position.address,
+        onStage: setStage,
+      });
+      preparedWithdrawal.current = prepared;
+      setWithdrawalReview({ ...position, steps: prepared.transactions.length });
+    } catch (cause) { setError(friendlyError(cause, "liquidity")); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function signWithdrawal() {
+    if (!preparedWithdrawal.current) return;
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { signPreparedDlmmWithdrawal } = await import("../../../lib/meteoraDlmm");
+      const result = await signPreparedDlmmWithdrawal({ wallet, prepared: preparedWithdrawal.current, onStage: setStage });
+      setReceipt({ signature: result.signatures.at(-1), label: "Liquidity withdrawn" });
+      setWithdrawalReview(null); preparedWithdrawal.current = null;
+      await refresh();
+    } catch (cause) {
+      await refresh();
+      setError(friendlyError(cause, "liquidity"));
+      setPendingSignature(cause?.signature || null);
+      if (cause?.completedSignatures?.length) {
+        setReceipt({ signature: cause.completedSignatures.at(-1), label: "Withdrawal step confirmed; refresh before continuing" });
+      }
+      setWithdrawalReview(null); preparedWithdrawal.current = null;
+    }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  const referenceSolPerToken = plan?.referencePriceRaw
+    ? (Number(plan.referencePriceRaw) / 1000).toFixed(12).replace(/0+$/, "").replace(/\.$/, "") : null;
+  return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+    <div>
+      <h3 style={{ margin: 0 }}>Conviction liquidity · DLMM</h3>
+      <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+        A separate, optional Meteora market after DBC graduates to DAMM v2
+      </div>
+    </div>
+    <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.6 }}>
+      The creator can open a DLMM pool at the current DAMM v2 reference price. Anyone can then add their own {launch.dbc.symbol} and SOL to a position. Liquidity is not moved from DAMM v2 automatically. A position may earn trading fees, but returns are not guaranteed; this is not a funded Toluva reward.
+    </div>
+    {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+    {pendingSignature && <a href={explorer("tx", pendingSignature)} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
+    {stage && <div style={{ color: "var(--green)", fontSize: 12 }}>{stage}</div>}
+    {receipt && <a href={explorer("tx", receipt.signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>{receipt.label} · {shortAddress(receipt.signature)} ↗</a>}
+    {!linkedPool && plan && <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <StatTile label="Reference price" value={referenceSolPerToken ? `${referenceSolPerToken} SOL` : "—"} sub={`Per ${launch.dbc.symbol}; changes with the DAMM v2 market`} />
+        <StatTile label="DLMM bin step" value={`${plan.binStep} bps`} sub="Meteora devnet liquidity preset" />
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+        {plan.exists ? "The expected DLMM pool is already on chain and can be linked by this launch's creator." : "Creating the pool pays network costs and opens an empty market. The creator or participants must add liquidity separately."}
+      </div>
+      {isCreator ? <button type="button" className="btn primary" disabled={busy} onClick={createOrLink}>{busy ? "Working…" : plan.exists ? "Link this DLMM pool" : "Create and link DLMM pool"}</button>
+        : <div style={{ fontSize: 12, color: "var(--muted)" }}>Waiting for the launch creator to link this pool.</div>}
+    </>}
+    {linkedPool && <>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 12 }}>
+        <strong>Linked DLMM pool</strong><a href={explorer("address", linkedPool)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(linkedPool)} ↗</a>
+      </div>
+      {status?.linked && <>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <StatTile label="Bin step" value={`${status.binStep} bps`} />
+          <StatTile label="Your positions" value={wallet.connected ? String(status.positions.length) : "Connect wallet"} />
+        </div>
+        {wallet.connected && status.positions.map((position) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 9, fontSize: 12, display: "grid", gap: 5 }}>
+          <a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position {shortAddress(position.address)} ↗</a>
+          <div style={{ color: "var(--muted)" }}>Bin range {position.lowerBinId} to {position.upperBinId}</div>
+          <div>Liquidity now: {displayUnits(position.tokenXAmount, 6)} {launch.dbc.symbol} + {displayUnits(position.tokenYAmount, 9)} SOL</div>
+          <div style={{ color: "var(--muted)" }}>Unclaimed fees: {displayUnits(position.feeXAmount, 6)} {launch.dbc.symbol} + {displayUnits(position.feeYAmount, 9)} SOL</div>
+          <button type="button" className="btn ghost" disabled={busy} onClick={() => reviewWithdrawal(position)} style={{ justifySelf: "start" }}>Review full withdrawal</button>
+        </div>)}
+        {withdrawalReview && <div style={{ padding: 14, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.7 }}>
+          <strong>Review full withdrawal</strong>
+          <div>Position {shortAddress(withdrawalReview.address)} · {withdrawalReview.steps} wallet approval{withdrawalReview.steps === 1 ? "" : "s"}</div>
+          <div>All liquidity will be removed, accrued fees claimed, and the position closed. You will receive the token and SOL amounts available when the transaction executes. Network costs apply.</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn primary" disabled={busy} onClick={signWithdrawal}>{busy ? "Working…" : "Sign full withdrawal"}</button>
+            <button type="button" className="btn ghost" disabled={busy} onClick={() => { setWithdrawalReview(null); preparedWithdrawal.current = null; }}>Cancel</button>
+          </div>
+        </div>}
+        {!wallet.connected ? <button type="button" className="btn ghost" onClick={wallet.connect}>Connect wallet to add liquidity</button> : <>
+          <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Choose the amounts for your new position. Toluva uses a 21-bin spot range around the current price. Both deposits and network costs need wallet approval.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            <label style={{ display: "grid", gap: 6, fontSize: 12 }}>Amount ({launch.dbc.symbol})<input type="text" inputMode="decimal" value={baseAmount} onChange={(event) => { setBaseAmount(event.target.value); setReview(null); preparedPosition.current = null; }} placeholder="Token amount" style={{ border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /></label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12 }}>Amount (SOL)<input type="text" inputMode="decimal" value={quoteAmount} onChange={(event) => { setQuoteAmount(event.target.value); setReview(null); preparedPosition.current = null; }} placeholder="SOL amount" style={{ border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /></label>
+          </div>
+          {review ? <div style={{ padding: 14, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.7 }}>
+            <strong>Review your deposit</strong><div>{review.baseAmount} {launch.dbc.symbol} + {review.quoteAmount} SOL</div>
+            <div>DLMM bin range: {review.minBinId} to {review.maxBinId} · 1% deposit slippage setting</div>
+            <div>Creating a position costs network rent and fees. You can review a full withdrawal from this page; the position's value can change with price.</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button type="button" className="btn primary" disabled={busy} onClick={signPosition}>{busy ? "Working…" : "Sign deposit"}</button>
+              <button type="button" className="btn ghost" disabled={busy} onClick={() => { setReview(null); preparedPosition.current = null; }}>Change amounts</button>
+            </div>
+          </div> : <button type="button" className="btn primary" disabled={busy || !baseAmount.trim() || !quoteAmount.trim()} onClick={reviewPosition}>{busy ? "Working…" : "Review liquidity deposit"}</button>}
+        </>}
+      </>}
+    </>}
+    {!plan && !linkedPool && !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking DLMM pool options…</div>}
+  </div>;
+}
+
 function MeteoraMigrationCard({ launch, explorer }) {
   const wallet = useWallet();
   const chain = launch.dbc.liveStatus;
@@ -898,6 +1101,7 @@ function MeteoraTokenDetailPage({ launch }) {
       </div>
       <DbcActivityCard launch={launch} explorer={explorer} />
       <ConvictionProofCard launch={launch} explorer={explorer} />
+      {chain?.dammV2?.verified && <DlmmLiquidityCard launch={launch} explorer={explorer} />}
     </div>
   );
 }

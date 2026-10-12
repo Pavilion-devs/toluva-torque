@@ -5,6 +5,7 @@ const DEFAULT_ACTIONS = {
   quote: "get a current quote",
   wallet: "connect your wallet",
   data: "load live data",
+  liquidity: "complete this liquidity action",
 };
 
 export function friendlyError(error, action = "data") {
@@ -16,11 +17,13 @@ export function friendlyError(error, action = "data") {
   }
   if (error?.code === "BLOCKHASH_EXPIRED" || /blockhash.*expir|block height exceeded|blockheight exceeded|transactionexpiredblockheight/.test(message)) {
     if (action === "trade") return "The wallet approval expired. Review a fresh quote and try again.";
+    if (action === "liquidity") return "The wallet approval expired. Review the liquidity action again.";
     if (action === "migration") return "The wallet approval expired. Try the migration again with a new wallet request.";
     return "The wallet approval expired before Solana accepted it. Your completed steps are saved; try again with the button below.";
   }
   if (/blockhash not found|minimum context slot/.test(message)) {
     if (action === "trade") return "Solana couldn't accept this trade in time. Review a fresh quote and try again.";
+    if (action === "liquidity") return "Solana couldn't accept this liquidity action in time. Review it again.";
     if (action === "migration") return "Solana couldn't accept this migration in time. Refresh the pool status and try again.";
     return "Solana couldn't accept this launch step in time. Any confirmed steps are saved; try again with the button below.";
   }
@@ -51,6 +54,8 @@ export function friendlyError(error, action = "data") {
   if (/simulation failed|transaction failed|custom program error|instructionerror/.test(message)) {
     return action === "trade"
       ? "Solana couldn't accept this trade. Review a fresh quote and check your wallet balance before trying again."
+      : action === "liquidity"
+        ? "Solana couldn't accept this liquidity action. Refresh your position and wallet balance before trying again."
       : action === "migration"
         ? "Solana couldn't accept the migration. Refresh the pool status before trying again."
         : "Solana couldn't accept this launch step. Any confirmed steps are saved; try again in a moment.";

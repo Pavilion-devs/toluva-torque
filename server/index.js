@@ -7,6 +7,7 @@ import {
   getCampaignResults,
   getVerifiedDbcActivity,
   hasBuyEventForWallet,
+  linkDlmmPoolToLaunch,
   readRegistry,
   recordEvent,
   recordVerifiedDbcTrade,
@@ -43,6 +44,10 @@ import {
 import { verifyDbcSwapSignature } from "./services/meteora-activity.js";
 import { getConvictionProof } from "./services/conviction-proof.js";
 import { publicPoolStatusCache } from "./services/meteora-status-cache.js";
+import {
+  buildDlmmPoolTransaction, buildDlmmPositionTransaction, buildDlmmWithdrawalTransactions, createDlmmLinkChallenge,
+  getDlmmPlan, getLinkedDlmmStatus, verifyDlmmLinkAuthorization,
+} from "./services/meteora-dlmm.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
@@ -314,6 +319,47 @@ const server = http.createServer(async (req, res) => {
       }
       sendJson(res, 200, { proof: await getConvictionProof(launch) });
       return;
+    }
+
+    if (pathname.startsWith("/api/meteora/dlmm/")) {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const body = req.method === "POST" ? await readBody(req) : {};
+      const dbcPool = req.method === "POST" ? body.dbcPool : url.searchParams.get("dbcPool");
+      const launch = (await readRegistry()).launches.find((item) => item.dbc?.pool === dbcPool && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC launch is not registered on Toluva.");
+        error.status = 404;
+        throw error;
+      }
+      if (req.method === "GET" && pathname === "/api/meteora/dlmm/plan") {
+        sendJson(res, 200, { plan: await getDlmmPlan(launch) });
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/pool/build") {
+        sendJson(res, 200, await buildDlmmPoolTransaction(launch, body.payer));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/link/challenge") {
+        sendJson(res, 200, await createDlmmLinkChallenge(launch, body));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/link") {
+        const plan = await verifyDlmmLinkAuthorization(launch, body);
+        sendJson(res, 200, { launch: await linkDlmmPoolToLaunch(launch, plan.address) });
+        return;
+      }
+      if (req.method === "GET" && pathname === "/api/meteora/dlmm/status") {
+        sendJson(res, 200, { status: await getLinkedDlmmStatus(launch, url.searchParams.get("wallet")) });
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/position/build") {
+        sendJson(res, 200, await buildDlmmPositionTransaction(launch, body));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/position/remove/build") {
+        sendJson(res, 200, await buildDlmmWithdrawalTransactions(launch, body));
+        return;
+      }
     }
 
     if (req.method === "GET" && pathname === "/api/meteora/swap/quote") {

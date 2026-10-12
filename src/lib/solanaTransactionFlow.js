@@ -1,3 +1,5 @@
+import bs58 from "bs58";
+
 export class ExpiredTransactionError extends Error {
   constructor() {
     super("The transaction expired before it could be submitted.");
@@ -76,4 +78,3 @@ export async function signAndSendWalletTransaction({
   }
   return signature;
 }
-import bs58 from "bs58";

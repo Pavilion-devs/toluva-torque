@@ -298,6 +298,39 @@ export async function createLaunch(input) {
   });
 }
 
+export async function linkDlmmPoolToLaunch(launch, pool) {
+  if (!launch?.dbc?.pool || !pool) throw new Error("A DBC launch and DLMM pool are required.");
+  if (supabase) {
+    const existing = await supabase.from("launches").select("dbc").eq("sym", launch.sym).single();
+    if (existing.error) dbErr("launch DLMM lookup", existing.error);
+    if (existing.data.dbc?.dlmm?.pool && existing.data.dbc.dlmm.pool !== pool) {
+      const error = new Error("This launch already has a different DLMM pool linked.");
+      error.status = 409;
+      throw error;
+    }
+    const dbc = { ...existing.data.dbc, dlmm: { pool, linkedAt: existing.data.dbc?.dlmm?.linkedAt || new Date().toISOString() } };
+    const result = await supabase.from("launches").update({ dbc, updated_at: new Date().toISOString() }).eq("sym", launch.sym).select().single();
+    if (result.error) dbErr("launch DLMM update", result.error);
+    return launchFromRow(result.data);
+  }
+  return updateFileRegistry((registry) => {
+    const stored = registry.launches.find((item) => item.sym === launch.sym && item.dbc?.pool === launch.dbc.pool);
+    if (!stored) {
+      const error = new Error("Launch was not found.");
+      error.status = 404;
+      throw error;
+    }
+    if (stored.dbc.dlmm?.pool && stored.dbc.dlmm.pool !== pool) {
+      const error = new Error("This launch already has a different DLMM pool linked.");
+      error.status = 409;
+      throw error;
+    }
+    stored.dbc.dlmm = { pool, linkedAt: stored.dbc.dlmm?.linkedAt || new Date().toISOString() };
+    stored.updatedAt = new Date().toISOString();
+    return stored;
+  });
+}
+
 export async function createCampaign(input) {
   if (supabase) {
     const row = normalizeCampaignInsert(input);
