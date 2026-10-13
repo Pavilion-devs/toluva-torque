@@ -15,6 +15,7 @@ Toluva is a self-service token launch and liquidity experience built on Meteora.
 ## Table of contents
 
 - [Project overview](#project-overview)
+- [Product preview](#product-preview)
 - [What Toluva does](#what-toluva-does)
 - [A real devnet journey](#a-real-devnet-journey)
 - [Architecture](#architecture)
@@ -34,6 +35,14 @@ Most launch tools focus on getting a token live. Toluva follows what happens nex
 Toluva was built for [Meteora's Dynamic Bonding Curve challenge](https://superteam.fun/earn/listing/meteora-dbc). Its working contribution is an end-to-end DBC → DAMM v2 → DLMM flow, including a creator-signed launch, wallet-signed trades, a verified migration, and separate DLMM deposits and withdrawals. The optional Conviction observation is an **unfunded** proof experiment; Toluva does not currently distribute rewards.
 
 This repository began as the earlier Toluva Raydium LaunchLab + Torque project. The [original README](docs/torque-original-readme.md) and [original plan](docs/torque-original-plan.md) are preserved as history. Meteora-specific claims below are supported by the [new devnet proof](docs/meteora-proof.md).
+
+## Product preview
+
+<p align="center">
+  <a href="docs/assets/toluva-devnet-dashboard.png"><img src="docs/assets/toluva-devnet-dashboard.png" alt="Toluva devnet dashboard showing confirmed DBC launches, verified trade volume, recent activity, and migration progress" width="100%" /></a>
+</p>
+
+The public devnet dashboard, captured on October 13, 2026. Pool balances and activity change as people use the app; open the [live dashboard](https://devnet.toluva.xyz) for current figures.
 
 ## What Toluva does
 
@@ -65,10 +74,10 @@ The second wallet belongs to the same tester. It verifies a distinct-address flo
 ## Architecture
 
 <p align="center">
-  <a href="docs/architecture/toluva-devnet-architecture.png"><img src="docs/architecture/toluva-devnet-architecture.png" alt="Toluva devnet architecture: wallet and MCP clients, React app, isolated API and storage, browser signing, Solana DBC, DAMM v2 and optional DLMM" width="100%" /></a>
+  <a href="docs/architecture/toluva-devnet-architecture.svg"><img src="docs/architecture/toluva-devnet-architecture.svg" alt="Excalidraw diagram of the Toluva devnet architecture: wallet and MCP clients, React app, isolated API and storage, browser signing, Solana DBC, DAMM v2 and optional DLMM" width="100%" /></a>
 </p>
 
-[View full-size diagram](docs/architecture/toluva-devnet-architecture.png) · [Open the editable Excalidraw source](docs/architecture/toluva-devnet-architecture.excalidraw) · [Download SVG](docs/architecture/toluva-devnet-architecture.svg)
+[View the original SVG export](docs/architecture/toluva-devnet-architecture.svg) · [Open the editable Excalidraw source](docs/architecture/toluva-devnet-architecture.excalidraw)
 
 The React app is served behind TierHive's HTTPS routing and a Caddy web container. A separate Node API serves public data, content-addressed metadata, launch guidance, and unsigned Meteora SDK transactions. A persistent VPS volume stores the launch registry, submitted verified swaps, Conviction checkpoints, JSON, and artwork. Backups and health checks cover that volume. The browser reviews terms, holds generated signers, asks the connected wallet to sign, and broadcasts to Solana devnet. The API rereads pool and config state from chain.
 
