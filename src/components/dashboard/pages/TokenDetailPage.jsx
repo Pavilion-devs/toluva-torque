@@ -506,7 +506,59 @@ function pendingDbcProofs(pool) {
   } catch { return []; }
 }
 
-function MeteoraTradeCard({ launch }) {
+function OnchainRow({ label, address, kind = "address", explorer }) {
+  const [copied, setCopied] = React.useState(false);
+  const handleCopy = () => {
+    if (!address) return;
+    navigator.clipboard?.writeText(address).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--line)", fontSize: 12 }}>
+      <span style={{ color: "var(--muted)", fontWeight: 500 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Click to copy full address"
+          style={{
+            background: copied ? "var(--green-pale)" : "var(--card-muted)",
+            border: `1px solid ${copied ? "var(--green-light)" : "var(--line)"}`,
+            borderRadius: 6,
+            padding: "2px 8px",
+            fontFamily: "'Geist Mono', monospace",
+            fontSize: 11.5,
+            color: copied ? "var(--green)" : "var(--ink)",
+            cursor: "pointer",
+            transition: "all 140ms ease",
+          }}
+        >
+          {copied ? "Copied ✓" : shortAddress(address)}
+        </button>
+        {explorer && (
+          <a
+            href={explorer(kind, address)}
+            target="_blank"
+            rel="noreferrer"
+            title="Inspect on Solana Explorer"
+            style={{ color: "var(--muted)", display: "inline-flex", alignItems: "center", transition: "color 140ms" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--green)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--muted)"; }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none">
+              <path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MeteoraTradeCard({ launch, explorer, onSelectTab }) {
   const wallet = useWallet();
   const [saved] = React.useState(() => savedDbcTrade(launch.dbc.pool));
   const [direction, setDirection] = React.useState(saved.direction);
@@ -522,6 +574,8 @@ function MeteoraTradeCard({ launch }) {
   const [pendingProofs, setPendingProofs] = React.useState(() => pendingDbcProofs(launch.dbc.pool));
   const [proofError, setProofError] = React.useState(null);
   const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
+  const isMigrated = launch.dbc.liveStatus?.dammV2?.verified === true;
+  const dammPool = launch.dbc.liveStatus?.dammV2?.pool;
 
   React.useEffect(() => {
     try {
@@ -599,40 +653,191 @@ function MeteoraTradeCard({ launch }) {
     } finally { setBusy(false); }
   }
 
+  // If curve is finished and migrated to DAMM v2, display sleek graduation action card
+  if (!canTrade && isMigrated && !launch.dbc.liveStale && !launch.dbc.liveError) {
+    return (
+      <div className="card" style={{ padding: 24, display: "grid", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 36, height: 36, borderRadius: "50%",
+            background: "var(--green-pale)", color: "var(--green)", fontSize: 18,
+            border: "1.5px solid #fbcfe8"
+          }}>✓</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Curve Graduated</h3>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Meteora DAMM v2 active</div>
+          </div>
+        </div>
+
+        <div style={{ background: "var(--card-muted)", borderRadius: 14, padding: 14, fontSize: 12.5, lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>DBC Trading is Finalized</div>
+          <div style={{ color: "var(--ink-dim)" }}>
+            The bonding curve reached its target. The configured share of creator liquidity is permanently locked, and trading continues on the migrated DAMM v2 pool.
+          </div>
+        </div>
+
+        {dammPool && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#fff", border: "1px solid var(--line)", borderRadius: 12, fontSize: 12 }}>
+            <span style={{ color: "var(--muted)" }}>DAMM v2 Pool</span>
+            <a href={`https://explorer.solana.com/address/${dammPool}?cluster=${encodeURIComponent(launch.dbc.cluster || "devnet")}`} target="_blank" rel="noreferrer" style={{ fontFamily: "'Geist Mono', monospace", color: "var(--green)", fontWeight: 600 }}>
+              {shortAddress(dammPool)} ↗
+            </a>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+          {onSelectTab && (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => onSelectTab("liquidity")}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              Manage DLMM Liquidity →
+            </button>
+          )}
+          {dammPool && (
+            <a
+              href={`https://explorer.solana.com/address/${dammPool}?cluster=${encodeURIComponent(launch.dbc.cluster || "devnet")}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn ghost"
+              style={{ width: "100%", textAlign: "center", justifyContent: "center" }}
+            >
+              Inspect DAMM v2 on Solana ↗
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
       <div>
-        <h3 style={{ margin: 0 }}>Trade on Meteora DBC</h3>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Trade on Meteora DBC</h3>
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Devnet · exact input · wallet-signed</div>
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        {["buy", "sell"].map((mode) => <button key={mode} type="button" className={`btn ${direction === mode ? "primary" : "ghost"}`} onClick={() => updateDirection(mode)}>{mode === "buy" ? `Buy ${launch.dbc.symbol}` : `Sell ${launch.dbc.symbol}`}</button>)}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, background: "var(--card-muted)", padding: 4, borderRadius: 12 }}>
+        <button
+          type="button"
+          className={`btn ${direction === "buy" ? "primary" : "ghost"}`}
+          style={{ justifyContent: "center", padding: "8px 12px", borderRadius: 10 }}
+          onClick={() => updateDirection("buy")}
+        >
+          Buy ${launch.dbc.symbol}
+        </button>
+        <button
+          type="button"
+          className={`btn ${direction === "sell" ? "primary" : "ghost"}`}
+          style={{ justifyContent: "center", padding: "8px 12px", borderRadius: 10 }}
+          onClick={() => updateDirection("sell")}
+        >
+          Sell ${launch.dbc.symbol}
+        </button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 150px", gap: 12 }}>
-        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Amount ({direction === "buy" ? "SOL" : launch.dbc.symbol})
-          <input type="text" inputMode="decimal" value={amount} onChange={(event) => updateAmount(event.target.value)} placeholder={direction === "buy" ? "0.01" : "100"} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }} />
-        </label>
-        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Slippage
-          <select value={slippageBps} onChange={(event) => updateSlippage(Number(event.target.value))} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}>
-            <option value={50}>0.5%</option><option value={100}>1%</option><option value={200}>2%</option><option value={500}>5%</option>
-          </select>
-        </label>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 120px", gap: 10 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Amount ({direction === "buy" ? "SOL" : launch.dbc.symbol})
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => updateAmount(event.target.value)}
+              placeholder={direction === "buy" ? "0.01" : "100"}
+              style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Slippage
+            <select
+              value={slippageBps}
+              onChange={(event) => updateSlippage(Number(event.target.value))}
+              style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}
+            >
+              <option value={50}>0.5%</option>
+              <option value={100}>1%</option>
+              <option value={200}>2%</option>
+              <option value={500}>5%</option>
+            </select>
+          </label>
+        </div>
+
+        {/* Quick Amount Chips */}
+        {canTrade && (
+          <div className="quick-chips-row">
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>Preset:</span>
+            {(direction === "buy" ? ["0.01", "0.05", "0.1", "0.5"] : ["100", "500", "1000", "5000"]).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={`quick-chip${amount === preset ? " active" : ""}`}
+                onClick={() => updateAmount(preset)}
+              >
+                {preset} {direction === "buy" ? "SOL" : ""}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {!canTrade && <div style={{ fontSize: 12, color: "var(--muted)" }}>{launch.dbc.liveStale || launch.dbc.liveError ? "Live pool status is unavailable. Trading will resume after a fresh chain check." : launch.dbc.liveStatus ? "The DBC curve has finished; trading here is closed." : "Waiting for live pool state before trading."}</div>}
-      {quote && <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 12, lineHeight: 1.7 }}>
-        <div>Estimated received: <strong>{quote.outputAmountDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
-        <div>Minimum received: <strong>{quote.minimumAmountOutDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
-        <div style={{ color: "var(--muted)" }}>The transaction will fail if the minimum cannot be met. Network and token account costs may also apply.</div>
-      </div>}
+
+      {!canTrade && (
+        <div style={{ fontSize: 12, color: "var(--muted)", background: "var(--card-muted)", padding: "10px 14px", borderRadius: 10 }}>
+          {launch.dbc.liveStale || launch.dbc.liveError
+            ? "Live pool status is unavailable. Trading will resume after a fresh chain check."
+            : launch.dbc.liveStatus
+              ? "The DBC curve has finished; trading here is closed."
+              : "Waiting for live pool state before trading."}
+        </div>
+      )}
+
+      {quote && (
+        <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 12, lineHeight: 1.7 }}>
+          <div>Estimated received: <strong>{quote.outputAmountDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+          <div>Minimum received: <strong>{quote.minimumAmountOutDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+          <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>The transaction will fail if the minimum cannot be met. Network costs apply.</div>
+        </div>
+      )}
+
       {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
       {pendingSignature && <a href={`https://explorer.solana.com/tx/${pendingSignature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
       {wallet.error && <div style={{ color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
       {signature && <a href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed trade {shortAddress(signature)} ↗</a>}
       {pendingProofs.length > 0 && <div style={{ color: "var(--ink-dim)", fontSize: 12 }}>Checking {pendingProofs.length} confirmed trade{pendingProofs.length === 1 ? "" : "s"} for finalized activity. {proofError || ""}</div>}
-      <div style={{ display: "flex", gap: 10 }}>
-        <button type="button" className="btn ghost" disabled={busy || !canTrade || !amount} onClick={review}>{busy && !quote ? "Quoting…" : "Review quote"}</button>
-        {quote && <button type="button" className="btn primary" disabled={busy || !wallet.connected || !canTrade} onClick={trade}>{busy ? "Signing…" : "Sign trade"}</button>}
-        {!wallet.connected && <button type="button" className="btn ghost" onClick={wallet.connect}>Connect wallet</button>}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={busy || !canTrade || !amount}
+          onClick={review}
+          style={{ flex: 1, justifyContent: "center" }}
+        >
+          {busy && !quote ? "Quoting…" : "Review quote"}
+        </button>
+        {quote && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !wallet.connected || !canTrade}
+            onClick={trade}
+            style={{ flex: 1, justifyContent: "center" }}
+          >
+            {busy ? "Signing…" : "Sign trade"}
+          </button>
+        )}
+        {!wallet.connected && (
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={wallet.connect}
+            style={{ flex: 1, justifyContent: "center" }}
+          >
+            Connect wallet
+          </button>
+        )}
       </div>
     </div>
   );
@@ -641,7 +846,7 @@ function MeteoraTradeCard({ launch }) {
 function DbcActivityCard({ launch, explorer }) {
   const activity = launch.dbc.activity;
   return (
-    <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+    <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
       <div>
         <h3 style={{ margin: 0 }}>Verified DBC activity</h3>
         <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Finalized swaps submitted to Toluva and checked against this pool on chain.</div>
@@ -700,7 +905,7 @@ function ConvictionProofCard({ launch, explorer }) {
           ? "Your first balance check passed. The second check is pending."
           : yourRecord
             ? "Your wallet did not meet both balance checks under these rules."
-            : `No qualifying buy is recorded for your wallet in this pool. A verified buy of at least ${requiredBuySol} SOL is needed; smaller buys still appear in the activity above.`;
+            : `No qualifying buy is recorded for your wallet in this pool. A verified buy of at least ${requiredBuySol} SOL is needed; smaller buys still appear in the Activity tab.`;
 
   return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -1034,79 +1239,273 @@ function MeteoraTokenDetailPage({ launch }) {
   const terms = dbc.onchainConfig || {};
   const progress = chain?.progressPercent;
   const targetSol = terms.migrationQuoteThreshold ? Number(terms.migrationQuoteThreshold) / LAMPORTS_PER_SOL : null;
+  const raisedSol = chain?.quoteReserveLamports ? Number(chain.quoteReserveLamports) / LAMPORTS_PER_SOL : 0;
+  const isMigrated = chain?.dammV2?.verified === true;
   const status = dbc.liveStale || dbc.liveError
     ? "Waiting for fresh chain status"
     : chain
-      ? chain.dammV2?.verified ? "Migrated to DAMM v2" : chain.migrationStage === "bonding" ? "Trading on DBC" : "Curve complete · migration pending"
+      ? isMigrated ? "Migrated to DAMM v2" : chain.migrationStage === "bonding" ? "Trading on DBC" : "Curve complete · migration pending"
       : "Waiting for chain status";
   const explorer = (kind, value) => `https://explorer.solana.com/${kind}/${value}?cluster=${encodeURIComponent(dbc.cluster || "devnet")}`;
 
+  const getTabFromHash = React.useCallback(() => {
+    if (typeof window === "undefined") return "overview";
+    const hash = window.location.hash.replace("#", "").toLowerCase();
+    return ["overview", "liquidity", "conviction", "activity"].includes(hash) ? hash : "overview";
+  }, []);
+
+  const [activeTab, setActiveTab] = React.useState(getTabFromHash);
+  const [copiedMint, setCopiedMint] = React.useState(false);
+
+  React.useEffect(() => {
+    function handleHashChange() {
+      setActiveTab(getTabFromHash());
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [getTabFromHash]);
+
+  function selectTab(id) {
+    setActiveTab(id);
+    if (typeof window !== "undefined" && window.history?.replaceState) {
+      window.history.replaceState(null, "", `#${id}`);
+    }
+  }
+
+  function copyMint() {
+    if (!dbc.mint) return;
+    navigator.clipboard?.writeText(dbc.mint).then(() => {
+      setCopiedMint(true);
+      setTimeout(() => setCopiedMint(false), 1400);
+    });
+  }
+
+  const tradeCount = (dbc.activity?.trackedBuys ?? 0) + (dbc.activity?.trackedSells ?? 0);
+
+  const tabs = [
+    { id: "overview", label: "Overview & Curve", icon: "📊" },
+    { id: "liquidity", label: "Liquidity · DLMM", icon: "💧", badge: dbc.dlmm?.pool ? "Linked" : null },
+    { id: "conviction", label: "Conviction", icon: "🛡️", badge: "2 Checks" },
+    { id: "activity", label: "Activity", icon: "⚡", badge: tradeCount > 0 ? String(tradeCount) : null },
+  ];
+
   return (
     <div className="page">
-      <div className="page-head">
+      {/* Header Banner */}
+      <div className="token-header-banner">
         <div>
-          <Link href="/launches" style={{ fontSize: 12, color: "var(--muted)" }}>← All launches</Link>
-          <h1 style={{ marginTop: 10 }}>{launch.name}</h1>
-          <div className="sub">${dbc.symbol} · Meteora DBC · {dbc.cluster}</div>
-        </div>
-        <div className="actions"><span className={`status-pill ${chain?.dammV2?.verified ? "completed" : "progress"}`}>{status}</span></div>
-      </div>
-
-      {dbc.liveError && <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <span>{friendlyError(dbc.liveError, "data")}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
-        <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
-      </div>}
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
-        <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <TokenIcon symbol={dbc.symbol} size={72} imageUrl={launch.image} rounded={16} />
+          <Link href="/launches" style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+            ← All launches
+          </Link>
+          <div className="token-meta-title">
+            <TokenIcon symbol={dbc.symbol} size={52} imageUrl={launch.image} rounded={14} />
             <div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{launch.name}</div>
-              <div style={{ fontSize: 13, color: "var(--ink-dim)" }}>{launch.description || "Public Meteora DBC launch"}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>{launch.name}</h1>
+                <span className={`status-pill ${isMigrated ? "completed" : "progress"}`}>{status}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, color: "var(--ink-dim)" }}>${dbc.symbol}</span>
+                <span>•</span>
+                <span>Meteora DBC</span>
+                <span>•</span>
+                <span style={{ textTransform: "capitalize" }}>{dbc.cluster}</span>
+                {dbc.mint && (
+                  <>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={copyMint}
+                      className="copy-chip-btn"
+                      title="Copy Token Mint Address"
+                    >
+                      <span>Mint: {shortAddress(dbc.mint)}</span>
+                      <span>{copiedMint ? "✓" : "📋"}</span>
+                    </button>
+                    <a
+                      href={explorer("address", dbc.mint)}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "var(--green)", fontSize: 12 }}
+                      title="Inspect mint on Solana Explorer"
+                    >
+                      ↗
+                    </a>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 8 }}>
-              <strong>Graduation progress</strong><span>{Number.isFinite(progress) ? `${progress.toFixed(2)}%` : "—"}</span>
-            </div>
-            <div style={{ height: 10, background: "var(--card-muted)", borderRadius: 999, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, progress || 0))}%`, background: "linear-gradient(90deg,#fb7185,#ec4899)" }} />
-            </div>
-            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8 }}>Target: {targetSol === null ? "—" : `${targetSol} SOL`} · Destination: DAMM v2</div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            <StatTile label="DBC fee" value={terms.curveFeeBps === undefined ? "—" : `${terms.curveFeeBps / 100}%`} />
-            <StatTile label="DAMM v2 fee" value={terms.migratedPoolFeeBps === undefined ? "—" : `${terms.migratedPoolFeeBps / 100}%`} />
-            <StatTile label="Permanent lock" value={`${terms.creatorPermanentLockedLiquidityPercentage ?? 0}%`} sub="Creator liquidity" />
-            <StatTile label="Creator liquidity" value={`${terms.creatorLiquidityPercentage ?? 0}%`} sub="Unlocked at migration" />
           </div>
         </div>
-        <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
-          <h3 style={{ margin: 0 }}>On-chain launch record</h3>
-          {[
-            ["Token mint", dbc.mint, "address"],
-            ["DBC pool", dbc.pool, "address"],
-            ["Config", dbc.config, "address"],
-            ["Creator", launch.creator, "address"],
-            ["Fee claimer", terms.feeClaimer, "address"],
-            ["Leftover receiver", terms.leftoverReceiver, "address"],
-            ["Launch transaction", dbc.signature, "tx"],
-          ].map(([label, address, kind]) => address && (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
-              <span style={{ color: "var(--muted)" }}>{label}</span>
-              <a href={explorer(kind, address)} target="_blank" rel="noreferrer" style={{ fontFamily: "'Geist Mono', monospace", color: "var(--green)" }}>{shortAddress(address)} ↗</a>
-            </div>
-          ))}
-          {dbc.uri && <a href={dbc.uri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--green)" }}>Token metadata ↗</a>}
-          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Progress and terms are read from the selected devnet pool and config. The launch transaction is independently inspectable.</div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <a
+            href="#trade-panel"
+            className="btn primary mobile-only-trade-btn"
+            style={{ fontSize: 12, padding: "7px 14px", textDecoration: "none" }}
+            onClick={(e) => {
+              const el = document.getElementById("trade-panel");
+              if (el) {
+                e.preventDefault();
+                el.scrollIntoView({ behavior: "smooth" });
+              }
+            }}
+          >
+            ⚡ Trade
+          </a>
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ fontSize: 12, padding: "7px 14px" }}
+            onClick={() => refreshRegistry({ force: true })}
+          >
+            ↻ Refresh chain
+          </button>
         </div>
-        <MeteoraTradeCard key={dbc.pool} launch={launch} />
-        <MeteoraMigrationCard launch={launch} explorer={explorer} />
       </div>
-      <DbcActivityCard launch={launch} explorer={explorer} />
-      <ConvictionProofCard launch={launch} explorer={explorer} />
-      {chain?.dammV2?.verified && <DlmmLiquidityCard launch={launch} explorer={explorer} />}
+
+      {dbc.liveError && (
+        <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+          <span>{friendlyError(dbc.liveError, "data")}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
+          <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
+        </div>
+      )}
+
+      {/* Modern Two-Column DEX Terminal Layout */}
+      <div className="token-terminal-layout">
+        {/* Left Column: Contextual Tabbed Content */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
+          {/* Tabs */}
+          <div className="tab-nav-bar">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`tab-nav-btn${activeTab === tab.id ? " active" : ""}`}
+                onClick={() => selectTab(tab.id)}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+                {tab.badge && <span className="tab-nav-badge">{tab.badge}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* TAB 1: OVERVIEW */}
+          {activeTab === "overview" && (
+            <>
+              {/* Curve Progress & Economics Card */}
+              <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18 }}>Graduation Progress</h3>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                      Dynamic Bonding Curve to DAMM v2 Migration
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Geist Mono', monospace", color: "var(--ink)" }}>
+                      {Number.isFinite(progress) ? `${progress.toFixed(2)}%` : "0.00%"}
+                    </span>
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                      {raisedSol.toFixed(4)} / {targetSol === null ? "—" : `${targetSol} SOL`}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ height: 12, background: "var(--card-muted)", borderRadius: 999, overflow: "hidden", border: "1px solid var(--line)" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.max(0, Math.min(100, progress || 0))}%`,
+                        background: "linear-gradient(90deg, #635bff, #ec4899)",
+                        borderRadius: 999,
+                        transition: "width 400ms ease",
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>
+                    <span>Target: {targetSol === null ? "—" : `${targetSol} SOL`}</span>
+                    <span>Destination: Meteora DAMM v2</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+                  <StatTile label="DBC Fee" value={terms.curveFeeBps === undefined ? "—" : `${terms.curveFeeBps / 100}%`} sub="Trading fee" />
+                  <StatTile label="DAMM v2 Fee" value={terms.migratedPoolFeeBps === undefined ? "—" : `${terms.migratedPoolFeeBps / 100}%`} sub="AMM post-migration" />
+                  <StatTile label="Permanent Lock" value={`${terms.creatorPermanentLockedLiquidityPercentage ?? 0}%`} sub="Creator LP locked" />
+                  <StatTile label="Creator Liquidity" value={`${terms.creatorLiquidityPercentage ?? 0}%`} sub="Unlocked at migration" />
+                </div>
+              </div>
+
+              {/* On-Chain Record Card */}
+              <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3 style={{ margin: 0, fontSize: 16 }}>On-Chain Launch Record</h3>
+                  {dbc.uri && (
+                    <a href={dbc.uri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--green)", fontWeight: 600 }}>
+                      Token Metadata JSON ↗
+                    </a>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <OnchainRow label="Token Mint" address={dbc.mint} kind="address" explorer={explorer} />
+                  <OnchainRow label="DBC Pool" address={dbc.pool} kind="address" explorer={explorer} />
+                  <OnchainRow label="Config" address={dbc.config} kind="address" explorer={explorer} />
+                  <OnchainRow label="Creator" address={launch.creator} kind="address" explorer={explorer} />
+                  {terms.feeClaimer && <OnchainRow label="Fee Claimer" address={terms.feeClaimer} kind="address" explorer={explorer} />}
+                  {terms.leftoverReceiver && <OnchainRow label="Leftover Receiver" address={terms.leftoverReceiver} kind="address" explorer={explorer} />}
+                  {dbc.signature && <OnchainRow label="Launch Transaction" address={dbc.signature} kind="tx" explorer={explorer} />}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
+                  Launch terms are checked against Solana devnet accounts. Open the links to inspect the records.
+                </div>
+              </div>
+
+              {/* Migration Lifecycle Card */}
+              <MeteoraMigrationCard launch={launch} explorer={explorer} />
+            </>
+          )}
+
+          {/* TAB 2: LIQUIDITY (DLMM) */}
+          {activeTab === "liquidity" && (
+            <div>
+              {chain?.dammV2?.verified ? (
+                <DlmmLiquidityCard launch={launch} explorer={explorer} />
+              ) : (
+                <div className="card" style={{ padding: 36, textAlign: "center" }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>💧</div>
+                  <h3 style={{ margin: 0, fontSize: 18 }}>DLMM Liquidity Market</h3>
+                  <div style={{ maxWidth: 460, margin: "10px auto 0", fontSize: 13, color: "var(--ink-dim)", lineHeight: 1.6 }}>
+                    Concentrated DLMM liquidity opens after the Dynamic Bonding Curve reaches 100% of its target ({targetSol} SOL) and migrates to DAMM v2.
+                  </div>
+                  <div style={{ marginTop: 20 }}>
+                    <button type="button" className="btn ghost" onClick={() => selectTab("overview")}>
+                      View Curve Progress →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: CONVICTION */}
+          {activeTab === "conviction" && (
+            <ConvictionProofCard launch={launch} explorer={explorer} />
+          )}
+
+          {/* TAB 4: ACTIVITY */}
+          {activeTab === "activity" && (
+            <DbcActivityCard launch={launch} explorer={explorer} />
+          )}
+        </div>
+
+        {/* Right Column: Sticky Action & Trade Terminal */}
+        <div id="trade-panel" className="terminal-sticky-panel">
+          <MeteoraTradeCard key={dbc.pool} launch={launch} explorer={explorer} onSelectTab={selectTab} />
+        </div>
+      </div>
     </div>
   );
 }

@@ -612,6 +612,19 @@ function GradientTile({ symbol }) {
   );
 }
 
+function launchAge(launch) {
+  if (!launch.createdAt) return launch.age || "Date unavailable";
+  const createdAt = new Date(launch.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return launch.age || "Date unavailable";
+  const elapsed = Math.max(0, Date.now() - createdAt.getTime());
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function LaunchCard({ launch }) {
   const knownStatus = statusMap[launch.status] || { label: "Status unavailable", pill: "pending" };
   const statusInfo = launch.dbc?.liveStale && launch.status !== "unknown"
@@ -681,7 +694,7 @@ function LaunchCard({ launch }) {
           }}>
             <span>${ticker}</span>
             <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--muted)" }} />
-            <span>{launch.age || "now"}</span>
+            <span>{launchAge(launch)}</span>
           </div>
         </div>
 

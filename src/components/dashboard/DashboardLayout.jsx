@@ -29,8 +29,17 @@ const menuLinks = [
     ),
   },
   {
-    href: "/campaigns",
-    label: "Campaigns",
+    href: "/liquidity",
+    label: "Liquidity",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/conviction",
+    label: "Conviction",
     icon: (
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M12 2 4 6v6c0 5 3.4 9.5 8 10 4.6-.5 8-5 8-10V6l-8-4Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
@@ -39,12 +48,11 @@ const menuLinks = [
     ),
   },
   {
-    href: "/incentives",
-    label: "Incentives",
+    href: "/history",
+    label: "Activity",
     icon: (
       <svg viewBox="0 0 24 24" fill="none">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <circle cx={12} cy={12} r={3} stroke="currentColor" strokeWidth="1.8" />
+        <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -54,16 +62,6 @@ const menuLinks = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none">
         <path d="M4 20V10M10 20V4M16 20v-7M22 20V8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    href: "/history",
-    label: "History",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none">
-        <path d="M4 5h16M4 12h16M4 19h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M18 16v5l3-2.5L18 16Z" fill="currentColor" />
       </svg>
     ),
   },
@@ -104,6 +102,8 @@ const generalLinks = [
 function isActive(linkHref, pathname) {
   if (linkHref === "/dashboard") return pathname === "/dashboard";
   if (linkHref === "/") return false;
+  if (linkHref === "/history") return pathname === "/history" || pathname === "/activity";
+  if (linkHref === "/conviction") return pathname === "/conviction" || pathname === "/campaigns" || pathname === "/incentives";
   return pathname === linkHref || pathname.startsWith(linkHref + "/");
 }
 
@@ -120,17 +120,25 @@ function NavLink({ href, label, icon, badge, active }) {
 export default function DashboardLayout({ pathname, children }) {
   const wallet = useWallet();
   const { registry } = useRegistry();
-  const workspace = registry.workspace;
-  const buyEventCount = (registry.eventReceipts || []).filter(
-    (event) => event.type === "first_buy_completed" || event.type === "buy_completed",
+  const launchesCount = (registry.launches || []).length;
+  const verifiedTradesCount = (registry.eventReceipts || []).filter(
+    (event) => event.type === "dbc_buy_verified" || event.type === "dbc_sell_verified",
   ).length;
-  const links = menuLinks.filter((link) => link.href === "/dashboard" || link.href === "/launches").map((link) => {
-    if (link.href === "/launches") {
-      return { ...link, badge: String((registry.launches || []).length) };
+  const graduatedCount = (registry.launches || []).filter(
+    (l) => l.dbc?.liveStatus?.dammV2?.verified,
+  ).length;
+
+  const links = menuLinks.map((link) => {
+    if (link.href === "/launches" && launchesCount > 0) {
+      return { ...link, badge: String(launchesCount) };
     }
 
-    if (link.href === "/history" && buyEventCount > 0) {
-      return { ...link, badge: String(buyEventCount) };
+    if (link.href === "/liquidity" && graduatedCount > 0) {
+      return { ...link, badge: String(graduatedCount) };
+    }
+
+    if (link.href === "/history" && verifiedTradesCount > 0) {
+      return { ...link, badge: String(verifiedTradesCount) };
     }
 
     return link;
