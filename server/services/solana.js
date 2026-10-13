@@ -18,7 +18,6 @@ export async function getSolanaStatus() {
     return {
       ok: true,
       cluster: config.solana.cluster,
-      rpcUrl: config.solana.rpcUrl,
       version,
     };
   } catch (error) {
@@ -27,11 +26,9 @@ export async function getSolanaStatus() {
     return {
       ok: false,
       cluster: config.solana.cluster,
-      rpcUrl: config.solana.rpcUrl,
       reason: missingDependency ? "missing_dependency" : "rpc_unavailable",
       dependency: missingDependency ? "@solana/web3.js" : undefined,
       timeoutMs: config.solana.statusTimeoutMs,
-      error: error.message,
     };
   }
 }

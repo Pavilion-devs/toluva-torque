@@ -4,25 +4,23 @@ const footerGroups = [
   {
     title: "Product",
     links: [
-      { label: "Open launchpad", href: "/dashboard" },
+      { label: "Open launchpad", href: "/launches" },
       { label: "How it works", href: "#how-it-works" },
-      { label: "Templates", href: "#templates" },
+      { label: "Launches", href: "/launches" },
     ],
   },
   {
     title: "Stack",
     links: [
-      { label: "Raydium LaunchLab", href: "https://docs.raydium.io/raydium/launchlab/launchlab" },
-      { label: "Torque", href: "https://platform.torque.so/docs/mcp/quickstart" },
+      { label: "Meteora DBC", href: "https://docs.meteora.ag/core-products/dbc/what-is-dbc" },
+      { label: "DAMM v2", href: "https://docs.meteora.ag/developer-guides/damm-v2" },
       { label: "Solana", href: "https://solana.com" },
     ],
   },
   {
     title: "Project",
     links: [
-      { label: "GitHub", href: "#" },
-      { label: "Friction log", href: "#" },
-      { label: "X / @toluvaxyz", href: "#" },
+      { label: "GitHub", href: "https://github.com/Pavilion-devs/toluva-torque" },
     ],
   },
 ];
@@ -48,7 +46,7 @@ function FooterBrand() {
         <span>Toluva</span>
       </a>
       <p className="max-w-[280px] text-sm text-slate-500" data-aura-component-name="Footer">
-        Incentive-native launchpad. Every launch ships with growth attached.
+        Wallet-signed Meteora launches with public on-chain terms.
       </p>
       <div
         className="mt-2 inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500"
@@ -99,7 +97,7 @@ export default function Footer() {
           className="mt-16 flex flex-col items-start justify-between gap-4 border-t border-slate-200/70 pt-8 text-xs text-slate-400 md:flex-row md:items-center"
           data-aura-component-name="Footer"
         >
-          <span>© 2026 Toluva. Built for the Torque MCP track.</span>
+        <span>© 2026 Toluva.</span>
           <span className="font-mono">toluva.xyz</span>
         </div>
       </div>

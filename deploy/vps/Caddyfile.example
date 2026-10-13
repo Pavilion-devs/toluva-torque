@@ -1,0 +1,12 @@
+# Replace both example hostnames before using this file.
+devnet.example.org {
+    root * /opt/toluva/current/dist
+    encode zstd gzip
+    try_files {path} /index.html
+    file_server
+}
+
+api.devnet.example.org {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8787
+}

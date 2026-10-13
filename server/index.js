@@ -5,9 +5,12 @@ import {
   createCampaign,
   createLaunch,
   getCampaignResults,
+  getVerifiedDbcActivity,
   hasBuyEventForWallet,
+  linkDlmmPoolToLaunch,
   readRegistry,
   recordEvent,
+  recordVerifiedDbcTrade,
 } from "./registry-store.js";
 import {
   buildBuyTransaction,
@@ -17,18 +20,86 @@ import {
   prepareLaunchTransactionPlan,
 } from "./services/raydium-launchlab.js";
 import { getSolanaStatus } from "./services/solana.js";
+import {
+  buildConfigTransaction,
+  buildMigrationTransaction,
+  buildPoolTransaction,
+  buildSwapTransaction,
+  convictionTerms,
+  getConfigTerms,
+  getPoolStatus,
+  quoteDbcSwap,
+  summarizeConfig,
+  verifyPoolLaunch,
+} from "./services/meteora-dbc.js";
 import { torqueEventSchemas } from "./services/torque-event-catalog.js";
 import { emitTorqueEvent } from "./services/torque-client.js";
+import {
+  createMetadataChallenge,
+  metadataHostingStatus,
+  publishTokenMetadata,
+  readHostedTokenMetadata,
+  readLocalMetadataAsset,
+} from "./services/meteora-metadata.js";
+import { verifyDbcSwapSignature } from "./services/meteora-activity.js";
+import { getConvictionProof } from "./services/conviction-proof.js";
+import { publicPoolStatusCache } from "./services/meteora-status-cache.js";
+import {
+  buildDlmmPoolTransaction, buildDlmmPositionTransaction, buildDlmmWithdrawalTransactions, createDlmmLinkChallenge,
+  getDlmmPlan, getLinkedDlmmStatus, verifyDlmmLinkAuthorization,
+} from "./services/meteora-dlmm.js";
+import {
+  draftLaunchFromPrompt, operatorAvailability, operatorLaunchReport, operatorLaunchTerms,
+} from "./services/launch-operator.js";
+import { handleToluvaMcp } from "./services/toluva-mcp.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
+const operatorDraftAttempts = new Map();
+let operatorDraftsThisHour = { start: Date.now(), count: 0 };
+
+function checkOperatorDraftBudget(req) {
+  const now = Date.now();
+  if (now - operatorDraftsThisHour.start >= 3_600_000) operatorDraftsThisHour = { start: now, count: 0 };
+  if (operatorDraftsThisHour.count >= config.operator.maxDraftsPerHour) {
+    const error = new Error("AI drafting is busy right now. Please use the launch form directly.");
+    error.status = 429;
+    throw error;
+  }
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const address = forwarded || req.socket.remoteAddress || "unknown";
+  const current = operatorDraftAttempts.get(address);
+  const entry = !current || now - current.start >= 60_000 ? { start: now, count: 0 } : current;
+  if (entry.count >= 3) {
+    const error = new Error("Please wait a minute before requesting another AI draft.");
+    error.status = 429;
+    throw error;
+  }
+  entry.count += 1;
+  operatorDraftAttempts.set(address, entry);
+  operatorDraftsThisHour.count += 1;
+  if (operatorDraftAttempts.size > 1000) {
+    for (const [key, value] of operatorDraftAttempts) {
+      if (now - value.start >= 60_000) operatorDraftAttempts.delete(key);
+    }
+  }
+}
+
+function livePoolError(error) {
+  const message = error?.message || "";
+  if (/429|rate limit/i.test(message)) return "Solana is busy. Retrying automatically.";
+  if (message === "fetch failed" || /ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|network request failed/i.test(message)) {
+    return "Solana RPC is unreachable. Retrying automatically.";
+  }
+  return message || "Unable to read DBC pool.";
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, MCP-Protocol-Version, MCP-Session-Id",
   });
   res.end(JSON.stringify(body, null, 2));
 }
@@ -39,10 +110,17 @@ function sendError(res, error) {
   });
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = 64 * 1024) {
   const chunks = [];
+  let bytes = 0;
 
   for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) {
+      const error = new Error(`Request body must be smaller than ${Math.floor(maxBytes / 1024)} KB.`);
+      error.status = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
 
@@ -80,7 +158,7 @@ function bondingProgressFromPool(pool) {
   return Number((realB * 100000n) / totalFundRaisingB) / 1000;
 }
 
-async function registryWithLiveRaydiumState() {
+async function registryWithLivePoolState() {
   const registry = await readRegistry();
   const launches = registry.launches || [];
 
@@ -88,7 +166,39 @@ async function registryWithLiveRaydiumState() {
     launches.map(async (launch) => {
       const poolId = launch.raydium?.poolId;
 
-      if (!poolId) {
+      if (launch.dbc?.pool) {
+        try {
+          launch.dbc.activity = await getVerifiedDbcActivity(launch);
+        } catch (error) {
+          launch.dbc.activity = { error: error.message || "Verified activity is unavailable." };
+        }
+        try {
+          const current = await publicPoolStatusCache.read(launch.dbc.pool);
+          launch.dbc = {
+            ...launch.dbc,
+            liveStatus: current.status,
+            liveCheckedAt: current.checkedAt,
+            liveLastAttemptAt: current.stale ? new Date().toISOString() : null,
+            liveStale: current.stale,
+            liveError: current.error ? livePoolError(current.error) : null,
+          };
+          if (current.status) {
+            launch.bonded = current.status.progressPercent;
+            launch.migrationState = current.status.dammV2.verified ? "migrated" : current.status.migrationStage === "bonding" ? "bonding" : "migrating";
+            launch.status = launch.migrationState;
+          } else {
+            launch.migrationState = "unknown";
+            launch.status = "unknown";
+          }
+        } catch (error) {
+          launch.dbc = { ...launch.dbc, liveStatus: null, liveStale: true, liveError: livePoolError(error) };
+          launch.migrationState = "unknown";
+          launch.status = "unknown";
+        }
+        return;
+      }
+
+      if (!poolId || !config.legacyEnabled) {
         return;
       }
 
@@ -133,6 +243,36 @@ const server = http.createServer(async (req, res) => {
   const pathname = routePath(req);
 
   try {
+    if (pathname === "/mcp") {
+      await handleToluvaMcp(req, res);
+      return;
+    }
+    const metadataAsset = pathname.match(/^\/metadata\/(images\/[a-f0-9]{64}\.jpg|tokens\/[a-f0-9]{64}\.json)$/);
+    if (req.method === "GET" && metadataAsset) {
+      const asset = await readLocalMetadataAsset(metadataAsset[1]);
+      if (!asset) sendJson(res, 404, { error: "Metadata asset not found." });
+      else {
+        res.writeHead(200, {
+          "Content-Type": asset.contentType,
+          "Content-Length": asset.bytes.length,
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(asset.bytes);
+      }
+      return;
+    }
+    const legacyWrite = req.method === "POST" && (
+      pathname === "/api/launches"
+      || pathname === "/api/campaigns"
+      || pathname === "/api/events"
+      || /^\/api\/launches\/[^/]+\/buy-events$/.test(pathname)
+    );
+    if (!config.legacyEnabled && (legacyWrite || pathname.startsWith("/api/raydium/") || pathname.startsWith("/api/torque/"))) {
+      sendJson(res, 410, { error: "This prior-project endpoint is disabled in the Meteora product." });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/health") {
       sendJson(res, 200, { ok: true, service: "toluva-api" });
       return;
@@ -153,7 +293,201 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && pathname === "/api/registry") {
-      sendJson(res, 200, await registryWithLiveRaydiumState());
+      sendJson(res, 200, await registryWithLivePoolState());
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/operator/availability") {
+      sendJson(res, 200, { operator: operatorAvailability() });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/operator/draft") {
+      if (config.operator.openaiApiKey) checkOperatorDraftBudget(req);
+      sendJson(res, 200, await draftLaunchFromPrompt(await readBody(req, 2048)));
+      return;
+    }
+
+    const operatorRead = pathname.match(/^\/api\/operator\/launches\/([^/]+)\/(report|terms)$/);
+    if (req.method === "GET" && operatorRead) {
+      const launchId = decodeURIComponent(operatorRead[1]);
+      sendJson(res, 200, operatorRead[2] === "report"
+        ? await operatorLaunchReport(launchId) : await operatorLaunchTerms(launchId));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/terms") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { terms: convictionTerms({ migrationThresholdSol: url.searchParams.get("migrationThresholdSol") || undefined }) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/metadata/status") {
+      sendJson(res, 200, { hosting: metadataHostingStatus() });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/metadata/challenge") {
+      sendJson(res, 200, createMetadataChallenge(await readBody(req, 512 * 1024)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/metadata/publish") {
+      sendJson(res, 201, await publishTokenMetadata(await readBody(req, 512 * 1024)));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/config") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const { address, state } = await getConfigTerms(url.searchParams.get("address"));
+      sendJson(res, 200, { config: summarizeConfig(address, state) });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/pool") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { pool: await getPoolStatus(url.searchParams.get("address")) });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/trades/verify") {
+      const body = await readBody(req);
+      const registry = await readRegistry();
+      const launch = (registry.launches || []).find((item) => item.dbc?.pool === body.pool && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC pool is not registered on Toluva for the current network.");
+        error.status = 404;
+        throw error;
+      }
+      const trade = await verifyDbcSwapSignature({ signature: body.signature, pool: launch.dbc.pool, mint: launch.dbc.mint });
+      const event = await recordVerifiedDbcTrade(launch, trade);
+      sendJson(res, 200, { trade, eventId: event.id });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/conviction-proof") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const launch = (await readRegistry()).launches.find((item) => item.dbc?.pool === url.searchParams.get("pool") && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC pool is not registered on Toluva for the current network.");
+        error.status = 404;
+        throw error;
+      }
+      sendJson(res, 200, { proof: await getConvictionProof(launch) });
+      return;
+    }
+
+    if (pathname.startsWith("/api/meteora/dlmm/")) {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const body = req.method === "POST" ? await readBody(req) : {};
+      const dbcPool = req.method === "POST" ? body.dbcPool : url.searchParams.get("dbcPool");
+      const launch = (await readRegistry()).launches.find((item) => item.dbc?.pool === dbcPool && item.dbc?.cluster === config.solana.cluster);
+      if (!launch) {
+        const error = new Error("This DBC launch is not registered on Toluva.");
+        error.status = 404;
+        throw error;
+      }
+      if (req.method === "GET" && pathname === "/api/meteora/dlmm/plan") {
+        sendJson(res, 200, { plan: await getDlmmPlan(launch) });
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/pool/build") {
+        sendJson(res, 200, await buildDlmmPoolTransaction(launch, body.payer));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/link/challenge") {
+        sendJson(res, 200, await createDlmmLinkChallenge(launch, body));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/link") {
+        const plan = await verifyDlmmLinkAuthorization(launch, body);
+        sendJson(res, 200, { launch: await linkDlmmPoolToLaunch(launch, plan.address) });
+        return;
+      }
+      if (req.method === "GET" && pathname === "/api/meteora/dlmm/status") {
+        sendJson(res, 200, { status: await getLinkedDlmmStatus(launch, url.searchParams.get("wallet")) });
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/position/build") {
+        sendJson(res, 200, await buildDlmmPositionTransaction(launch, body));
+        return;
+      }
+      if (req.method === "POST" && pathname === "/api/meteora/dlmm/position/remove/build") {
+        sendJson(res, 200, await buildDlmmWithdrawalTransactions(launch, body));
+        return;
+      }
+    }
+
+    if (req.method === "GET" && pathname === "/api/meteora/swap/quote") {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      sendJson(res, 200, { quote: await quoteDbcSwap(Object.fromEntries(url.searchParams)) });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/swap/build") {
+      sendJson(res, 200, await buildSwapTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/migration/build") {
+      sendJson(res, 200, await buildMigrationTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/config/build") {
+      sendJson(res, 200, await buildConfigTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/pool/build") {
+      sendJson(res, 200, await buildPoolTransaction(await readBody(req)));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/meteora/launches") {
+      const body = await readBody(req);
+      const verified = await verifyPoolLaunch(body);
+      const existing = (await readRegistry()).launches.find((item) => item.dbc?.mint === verified.mint && item.dbc?.cluster === config.solana.cluster);
+      if (existing) {
+        sendJson(res, 200, { launch: existing, alreadyRegistered: true });
+        return;
+      }
+      const symbol = String(verified.metadata.symbol).trim().toUpperCase();
+      const name = String(verified.metadata.name).trim();
+      if (!/^[A-Z0-9]{2,10}$/.test(symbol) || !name || name.length > 32) {
+        const error = new Error("A 2–10 character symbol and token name are required.");
+        error.status = 400;
+        throw error;
+      }
+      const hostedMetadata = await readHostedTokenMetadata(verified.metadata.uri);
+      if (hostedMetadata && (hostedMetadata.name !== name || hostedMetadata.symbol !== symbol)) {
+        const error = new Error("Hosted token metadata does not match the confirmed on-chain name and symbol.");
+        error.status = 400;
+        throw error;
+      }
+      const launch = await createLaunch({
+        sym: `${symbol}-${verified.mint}`.toUpperCase(),
+        name,
+        description: hostedMetadata?.description || "",
+        image: hostedMetadata?.image || null,
+        status: "bonding",
+        pool: verified.pool,
+        age: "now",
+        migrationTime: "Pending",
+        migrationState: "bonding",
+        creator: String(body.creator),
+        dbc: {
+          cluster: config.solana.cluster,
+          symbol,
+          mint: verified.mint,
+          pool: verified.pool,
+          config: verified.config,
+          signature: String(body.signature),
+          uri: verified.metadata.uri,
+          onchainConfig: summarizeConfig(verified.config, verified.configState),
+        },
+      });
+      sendJson(res, 201, { launch });
       return;
     }
 
@@ -375,6 +709,27 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
+server.listen(port, config.api.host, () => {
   console.log(`Toluva API listening on port ${port}`);
 });
+
+let sampling = false;
+async function sampleConvictionLaunches() {
+  if (sampling) return;
+  sampling = true;
+  try {
+    const launches = (await readRegistry()).launches || [];
+    for (const launch of launches) {
+      if (!launch.dbc?.pool || launch.dbc.cluster !== config.solana.cluster) continue;
+      try { await getConvictionProof(launch); }
+      catch (error) { console.warn(`Conviction observation for ${launch.dbc.pool} delayed: ${error.message}`); }
+    }
+  } catch (error) {
+    console.warn(`Conviction observation cycle delayed: ${error.message}`);
+  } finally {
+    sampling = false;
+  }
+}
+
+setTimeout(sampleConvictionLaunches, 5_000).unref();
+setInterval(sampleConvictionLaunches, 5 * 60_000).unref();

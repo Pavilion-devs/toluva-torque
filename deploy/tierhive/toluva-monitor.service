@@ -1,0 +1,6 @@
+[Unit]
+Description=Check Toluva devnet API, pool status, and hosted metadata
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/toluva/repo/deploy/tierhive/monitor.py

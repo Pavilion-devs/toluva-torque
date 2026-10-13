@@ -1,0 +1,21 @@
+{
+  "name": "Toluva Conviction Devnet",
+  "symbol": "TOLUVADEV",
+  "description": "A public Solana devnet pilot of Toluva Conviction, a self-service Meteora DBC launch. This experimental token has no monetary value.",
+  "image": "https://raw.githubusercontent.com/Pavilion-devs/toluva-torque/214154048c7da914a32e090ae66a2bd79c6f0fa2/public/favicon.svg",
+  "external_url": "https://github.com/Pavilion-devs/toluva-torque",
+  "attributes": [
+    { "trait_type": "Network", "value": "Solana devnet" },
+    { "trait_type": "Launch protocol", "value": "Meteora DBC" },
+    { "trait_type": "Launch recipe", "value": "Conviction v1" }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://raw.githubusercontent.com/Pavilion-devs/toluva-torque/214154048c7da914a32e090ae66a2bd79c6f0fa2/public/favicon.svg",
+        "type": "image/svg+xml"
+      }
+    ],
+    "category": "image"
+  }
+}

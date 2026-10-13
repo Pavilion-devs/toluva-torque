@@ -50,6 +50,7 @@ function launchFromRow(row) {
     migrationTime: row.migration_time,
     migrationState: row.migration_state,
     raydium: row.raydium ?? null,
+    dbc: row.dbc ?? null,
     torque: row.torque ?? null,
     creator: row.creator ?? null,
     createdAt: row.created_at,
@@ -128,6 +129,7 @@ function normalizeLaunchInsert(input) {
     migration_time: input.migrationTime || input.migration_time || "Draft",
     migration_state: input.migrationState || input.migration_state || input.status || "draft",
     raydium: input.raydium || null,
+    dbc: input.dbc || null,
     torque: input.torque || null,
     creator: input.creator || null,
     created_at: input.createdAt || new Date().toISOString(),
@@ -230,12 +232,18 @@ async function writeFileRegistry(nextRegistry) {
   return nextRegistry;
 }
 
+let fileWriteQueue = Promise.resolve();
+
 async function updateFileRegistry(updater) {
-  const current = await readFileRegistry();
-  const draft = clone(current);
-  const result = await updater(draft);
-  await writeFileRegistry(draft);
-  return result ?? draft;
+  const write = fileWriteQueue.then(async () => {
+    const current = await readFileRegistry();
+    const draft = clone(current);
+    const result = await updater(draft);
+    await writeFileRegistry(draft);
+    return result ?? draft;
+  });
+  fileWriteQueue = write.catch(() => {});
+  return write;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -281,12 +289,45 @@ export async function createLaunch(input) {
       buyers: Number(input.buyers || 0), pool: input.pool || null,
       age: input.age || "Draft", migrationTime: input.migrationTime || "Draft",
       migrationState: input.migrationState || input.status || "draft",
-      raydium: input.raydium || null, torque: input.torque || null,
+      raydium: input.raydium || null, dbc: input.dbc || null, torque: input.torque || null,
       creator: input.creator || null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     registry.launches.unshift(launch);
     return launch;
+  });
+}
+
+export async function linkDlmmPoolToLaunch(launch, pool) {
+  if (!launch?.dbc?.pool || !pool) throw new Error("A DBC launch and DLMM pool are required.");
+  if (supabase) {
+    const existing = await supabase.from("launches").select("dbc").eq("sym", launch.sym).single();
+    if (existing.error) dbErr("launch DLMM lookup", existing.error);
+    if (existing.data.dbc?.dlmm?.pool && existing.data.dbc.dlmm.pool !== pool) {
+      const error = new Error("This launch already has a different DLMM pool linked.");
+      error.status = 409;
+      throw error;
+    }
+    const dbc = { ...existing.data.dbc, dlmm: { pool, linkedAt: existing.data.dbc?.dlmm?.linkedAt || new Date().toISOString() } };
+    const result = await supabase.from("launches").update({ dbc, updated_at: new Date().toISOString() }).eq("sym", launch.sym).select().single();
+    if (result.error) dbErr("launch DLMM update", result.error);
+    return launchFromRow(result.data);
+  }
+  return updateFileRegistry((registry) => {
+    const stored = registry.launches.find((item) => item.sym === launch.sym && item.dbc?.pool === launch.dbc.pool);
+    if (!stored) {
+      const error = new Error("Launch was not found.");
+      error.status = 404;
+      throw error;
+    }
+    if (stored.dbc.dlmm?.pool && stored.dbc.dlmm.pool !== pool) {
+      const error = new Error("This launch already has a different DLMM pool linked.");
+      error.status = 409;
+      throw error;
+    }
+    stored.dbc.dlmm = { pool, linkedAt: stored.dbc.dlmm?.linkedAt || new Date().toISOString() };
+    stored.updatedAt = new Date().toISOString();
+    return stored;
   });
 }
 
@@ -320,6 +361,11 @@ export async function createCampaign(input) {
 }
 
 export async function recordEvent(input) {
+  if (/^(dbc_|conviction_)/.test(String(input.type || input.eventType || "")) || /^(dbc_swap_|conviction_)/.test(String(input.id || ""))) {
+    const error = new Error("On-chain activity and conviction observations are recorded only by server verifiers.");
+    error.status = 400;
+    throw error;
+  }
   if (supabase) {
     const row = normalizeEventInsert(input);
     const { data, error } = await supabase.from("event_receipts").insert(row).select().single();
@@ -362,6 +408,134 @@ export async function recordEvent(input) {
     }
     return event;
   });
+}
+
+const DBC_ACTIVITY_TYPES = ["dbc_buy_verified", "dbc_sell_verified"];
+const MAX_ACTIVITY_EVENTS = 500;
+
+export async function recordVerifiedDbcTrade(launch, trade) {
+  const row = normalizeEventInsert({
+    id: `dbc_swap_${trade.signature}`,
+    type: trade.direction === "buy" ? "dbc_buy_verified" : "dbc_sell_verified",
+    token: launch.sym,
+    wallet: trade.wallet,
+    payload: trade,
+    status: "finalized",
+    createdAt: trade.blockTime ? new Date(trade.blockTime * 1000).toISOString() : new Date().toISOString(),
+  });
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts").upsert(row, { onConflict: "id", ignoreDuplicates: true }).select().maybeSingle();
+    if (error) dbErr("verified DBC trade insert", error);
+    if (data) return eventFromRow(data);
+    const existing = await supabase.from("event_receipts").select("*").eq("id", row.id).single();
+    if (existing.error) dbErr("verified DBC trade lookup", existing.error);
+    return eventFromRow(existing.data);
+  }
+  return updateFileRegistry((registry) => {
+    registry.eventReceipts = registry.eventReceipts || [];
+    const existing = registry.eventReceipts.find((event) => event.id === row.id);
+    if (existing) return existing;
+    const event = eventFromRow(row);
+    registry.eventReceipts.unshift(event);
+    return event;
+  });
+}
+
+export async function listVerifiedDbcTrades(launch) {
+  let events;
+  let complete;
+  if (supabase) {
+    const response = await supabase.from("event_receipts")
+      .select("*")
+      .eq("token", launch.sym)
+      .in("type", DBC_ACTIVITY_TYPES)
+      .contains("payload", { pool: launch.dbc.pool })
+      .order("created_at", { ascending: false })
+      .limit(MAX_ACTIVITY_EVENTS + 1);
+    if (response.error) dbErr("verified DBC activity select", response.error);
+    complete = response.data.length <= MAX_ACTIVITY_EVENTS;
+    events = response.data.slice(0, MAX_ACTIVITY_EVENTS).map(eventFromRow);
+  } else {
+    const registry = await readFileRegistry();
+    const matching = (registry.eventReceipts || [])
+      .filter((event) => event.token === launch.sym && DBC_ACTIVITY_TYPES.includes(event.type)
+        && event.payload?.pool === launch.dbc.pool)
+      .sort((a, b) => Number(b.payload?.slot || 0) - Number(a.payload?.slot || 0));
+    complete = matching.length <= MAX_ACTIVITY_EVENTS;
+    events = matching.slice(0, MAX_ACTIVITY_EVENTS);
+  }
+  return { events, complete };
+}
+
+const CONVICTION_OBSERVATION_TYPE = "conviction_balance_checkpoint_v2";
+
+export async function listConvictionObservations(launch) {
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts")
+      .select("*")
+      .eq("type", CONVICTION_OBSERVATION_TYPE)
+      .eq("token", launch.dbc.mint)
+      .order("created_at", { ascending: true })
+      .limit(1000);
+    if (error) dbErr("conviction observations select", error);
+    if (data.length === 1000) throw new Error("Conviction observation capacity reached; the leaderboard needs pagination before new checkpoints can be recorded.");
+    return data.map(eventFromRow).filter((event) => event.payload?.pool === launch.dbc.pool);
+  }
+  const registry = await readFileRegistry();
+  return (registry.eventReceipts || []).filter((event) => event.type === CONVICTION_OBSERVATION_TYPE
+    && event.token === launch.dbc.mint && event.payload?.pool === launch.dbc.pool);
+}
+
+export async function recordConvictionObservation(launch, observation) {
+  const phase = observation.phase;
+  if (phase !== "entry" && phase !== "followup") throw new Error("Invalid conviction checkpoint phase.");
+  const row = normalizeEventInsert({
+    id: `conviction_v2_${launch.dbc.pool}_${observation.wallet}_${phase}`,
+    type: CONVICTION_OBSERVATION_TYPE,
+    token: launch.dbc.mint,
+    wallet: observation.wallet,
+    payload: { ...observation, pool: launch.dbc.pool, mint: launch.dbc.mint, policyId: "conviction-checkpoints-v2" },
+    status: "finalized",
+    createdAt: new Date(observation.blockTime * 1000).toISOString(),
+  });
+  if (supabase) {
+    const { data, error } = await supabase.from("event_receipts")
+      .upsert(row, { onConflict: "id", ignoreDuplicates: true }).select().maybeSingle();
+    if (error) dbErr("conviction observation insert", error);
+    if (data) return eventFromRow(data);
+    const existing = await supabase.from("event_receipts").select("*").eq("id", row.id).single();
+    if (existing.error) dbErr("conviction observation lookup", existing.error);
+    return eventFromRow(existing.data);
+  }
+  return updateFileRegistry((registry) => {
+    registry.eventReceipts = registry.eventReceipts || [];
+    const existing = registry.eventReceipts.find((event) => event.id === row.id);
+    if (existing) return existing;
+    const event = eventFromRow(row);
+    registry.eventReceipts.unshift(event);
+    return event;
+  });
+}
+
+export async function getVerifiedDbcActivity(launch) {
+  const { events, complete } = await listVerifiedDbcTrades(launch);
+  const buys = events.filter((event) => event.type === "dbc_buy_verified");
+  return {
+    source: "finalized_signatures_submitted_to_toluva",
+    complete,
+    trackedBuys: buys.length,
+    trackedSells: events.length - buys.length,
+    trackedBuyers: new Set(buys.map((event) => event.wallet)).size,
+    recent: events.slice(0, 10).map((event) => ({
+      signature: event.payload?.signature,
+      direction: event.type === "dbc_buy_verified" ? "buy" : "sell",
+      wallet: event.wallet,
+      baseAmount: event.payload?.baseAmount,
+      quoteLamports: event.payload?.quoteLamports,
+      slot: event.payload?.slot,
+      blockTime: event.payload?.blockTime,
+    })),
+  };
 }
 
 export async function hasBuyEventForWallet({ token, wallet }) {

@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up and verify Toluva devnet registry and metadata
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/toluva/repo/deploy/tierhive/data-backup.py create

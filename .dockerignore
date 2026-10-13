@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+node_modules
+dist
+data/local-launch-registry.json
+docs
+tests
+public
+src

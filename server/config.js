@@ -43,8 +43,10 @@ function numberFromEnv(value, fallback) {
 
 export const config = {
   projectRoot,
+  legacyEnabled: process.env.TOLUVA_LEGACY_API_ENABLED === "true",
   api: {
     port: numberFromEnv(process.env.PORT || process.env.TOLUVA_API_PORT, 8787),
+    host: firstSet(process.env.TOLUVA_API_HOST, "0.0.0.0"),
     allowedOrigin: process.env.TOLUVA_ALLOWED_ORIGIN || "*",
   },
   registry: {
@@ -75,7 +77,24 @@ export const config = {
     url: firstSet(process.env.SUPABASE_URL),
     serviceRoleKey: firstSet(process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
+  metadata: {
+    bucket: firstSet(process.env.TOLUVA_METADATA_BUCKET),
+    directory: firstSet(process.env.TOLUVA_METADATA_DIR),
+    publicBaseUrl: firstSet(process.env.TOLUVA_METADATA_PUBLIC_BASE_URL),
+    verifyBaseUrl: firstSet(process.env.TOLUVA_METADATA_VERIFY_BASE_URL),
+  },
+  operator: {
+    openaiApiKey: firstSet(process.env.OPENAI_API_KEY),
+    model: firstSet(process.env.TOLUVA_OPERATOR_MODEL, "gpt-5-mini"),
+    maxDraftsPerHour: numberFromEnv(process.env.TOLUVA_OPERATOR_MAX_DRAFTS_PER_HOUR, 30),
+    publicOrigin: firstSet(process.env.TOLUVA_PUBLIC_ORIGIN),
+  },
 };
+
+if (!config.operator.publicOrigin && config.metadata.publicBaseUrl) {
+  try { config.operator.publicOrigin = new URL(config.metadata.publicBaseUrl).origin; }
+  catch { /* Metadata configuration validation reports its own error. */ }
+}
 
 const raydiumCluster = normalizedCluster(firstSet(process.env.RAYDIUM_CLUSTER, config.solana.cluster));
 
@@ -105,7 +124,7 @@ export function integrationReadiness() {
     },
     solana: {
       cluster: config.solana.cluster,
-      rpcUrl: config.solana.rpcUrl,
+      rpcConfigured: Boolean(config.solana.rpcUrl),
       commitment: config.solana.commitment,
       statusTimeoutMs: config.solana.statusTimeoutMs,
     },

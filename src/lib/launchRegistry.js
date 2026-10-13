@@ -1,7 +1,7 @@
 import React from "react";
 import fallbackRegistry from "../../data/launch-registry.json";
+import { apiBaseUrl } from "./toluvaApi";
 
-const apiBaseUrl = import.meta.env.VITE_TOLUVA_API_URL || "http://127.0.0.1:8787";
 const registryRefreshMs = 10_000;
 const lamportsPerSol = 1_000_000_000;
 const listeners = new Set();
@@ -70,7 +70,7 @@ export async function refreshRegistry({ force = false } = {}) {
     return nextRegistry;
   } catch (error) {
     setRegistryState({
-      registry: fallbackRegistry,
+      registry: registryState.source === "static" ? fallbackRegistry : registryState.registry,
       source: "offline",
       loading: false,
       error: error instanceof Error ? error.message : "Registry API unavailable.",
@@ -167,7 +167,7 @@ export function getRegistryAnalytics(sourceRegistry = fallbackRegistry) {
   const sourceCampaigns = sourceRegistry.campaigns || [];
   const sourceEvents = sourceRegistry.eventReceipts || [];
   const buyEvents = sourceEvents.filter((event) => event.type === "buy_completed" || event.type === "first_buy_completed");
-  const raydiumLaunches = sourceLaunches.filter((launch) => launch.raydium?.poolId);
+  const meteoraLaunches = sourceLaunches.filter((launch) => launch.dbc?.pool);
   const activeCampaigns = sourceCampaigns.filter((campaign) => campaign.status === "live");
   const emittedTorqueEvents = sourceEvents.filter((event) => event.status === "emitted");
   const volumeByDay = buyEvents.reduce((days, event) => {
@@ -183,16 +183,16 @@ export function getRegistryAnalytics(sourceRegistry = fallbackRegistry) {
   return {
     stats: [
       { label: "Real launches", value: String(sourceLaunches.length), unit: "tokens", delta: "API registry", positive: true },
-      { label: "Raydium pools", value: String(raydiumLaunches.length), unit: "devnet", delta: "pool-backed", positive: true },
+      { label: "Meteora pools", value: String(meteoraLaunches.length), unit: "devnet", delta: "pool-backed", positive: true },
       { label: "Torque events", value: String(emittedTorqueEvents.length), unit: "accepted", delta: "ingest receipts", positive: true },
       { label: "Active campaigns", value: String(activeCampaigns.length), unit: "live", delta: "registry records", positive: true },
     ],
     topLaunches: [...sourceLaunches]
-      .sort((a, b) => Number(b.buyers || 0) - Number(a.buyers || 0) || Number(b.bonded || 0) - Number(a.bonded || 0))
+      .sort((a, b) => Number(b.dbc?.activity?.trackedBuyers ?? b.buyers ?? 0) - Number(a.dbc?.activity?.trackedBuyers ?? a.buyers ?? 0) || Number(b.bonded || 0) - Number(a.bonded || 0))
       .slice(0, 5)
       .map((launch) => ({
         sym: launch.sym,
-        metric: `${launch.buyers || 0} buyers · ${launch.status}`,
+        metric: launch.dbc ? `${launch.dbc.activity?.trackedBuyers ?? "—"} tracked buyers · ${launch.status}` : `${launch.buyers || 0} buyers · ${launch.status}`,
         pct: Math.max(0, Math.min(100, Number(launch.bonded || 0))),
       })),
     templateConversion: sourceCampaigns.map((campaign) => ({

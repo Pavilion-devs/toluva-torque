@@ -1,252 +1,41 @@
-# Toluva Local API
+# Toluva Meteora API
 
-The local API is intentionally small. It owns the file-backed registry at `data/launch-registry.json` and exposes the contract the frontend will use for Raydium and Torque data.
+The Node API builds unsigned Meteora DBC transactions, reads chain state and records confirmed launches. The browser holds generated signer keys and the connected wallet signs. New DBC launch records are verified on chain before publication.
 
-## Run
+Run locally with `npm run api` (port 8787), or run the API and web app together with `npm run dev`. Set `SOLANA_CLUSTER=devnet` and `SOLANA_RPC_URL` for the server, and point `VITE_SOLANA_RPC_URL` at the same cluster in the browser. Set `VITE_TOLUVA_API_URL` to the deployed API origin for public builds. The API uses a local file registry unless Supabase is configured; public deployments need persistent storage and the updated [schema](../scripts/supabase-schema.sql).
 
-```bash
-npm run api
-```
+## Current routes
 
-Default URL:
+| Route | Purpose |
+| --- | --- |
+| `GET /api/health` | API liveness. |
+| `GET /api/registry` | Public launch registry with live DBC status when chain reads succeed. |
+| `GET /api/meteora/terms?migrationThresholdSol=5` | Conviction v1 economics for creator review. |
+| `GET /api/meteora/metadata/status` | Whether public metadata hosting is configured. |
+| `POST /api/meteora/metadata/challenge` | Normalize `{name, symbol, description, imageDataUrl, wallet}` and return the exact short-lived message to sign. |
+| `POST /api/meteora/metadata/publish` | Verify the wallet message signature, publish content-addressed JPEG/JSON, check public readability and return an HTTPS URI. |
+| `GET /metadata/images/…` and `GET /metadata/tokens/…` | Immutable public asset reads when using the persistent API volume backend. |
+| `GET /api/meteora/config?address=…` | On-chain config summary. |
+| `GET /api/meteora/pool?address=…` | On-chain pool progress, migration state and reserves. |
+| `POST /api/meteora/config/build` | Build an unsigned creator-paid config transaction from `{payer, config, migrationThresholdSol}`. The fee claimer and leftover receiver are the payer. |
+| `POST /api/meteora/pool/build` | Build an unsigned pool transaction from `{payer, config, baseMint, name, symbol, uri, migrationThresholdSol}` after validating the on-chain config against the disclosed recipe. |
+| `POST /api/meteora/launches` | Register `{pool, mint, config, creator, signature}` after verifying the confirmed transaction and on-chain pool. The server decodes name, symbol and URI from the DBC pool-creation instruction. Repeating a valid registration returns the existing record. |
+| `GET /api/meteora/swap/quote?pool=…&direction=buy&amount=0.01&slippageBps=100` | Exact-input quote with output estimate and minimum received. `direction` is `buy` or `sell`. |
+| `POST /api/meteora/swap/build` | Build an unsigned exact-input swap from `{owner, pool, direction, amount, slippageBps}` using a fresh chain quote. |
+| `POST /api/meteora/trades/verify` | Accept `{pool, signature}`, fetch the finalized transaction and record one idempotent buy or sell only after checking the DBC program, pool, mint, owner signature and token balance changes. |
+| `GET /api/meteora/conviction-proof?pool=…` | Apply the published [Conviction checkpoints v2](conviction-checkpoints-v2.md) to verified submitted buys and two persisted finalized post-migration balance observations at least 24 hours apart. Returns an unfunded leaderboard, not a reward claim. |
+| `POST /api/meteora/migration/build` | Build a wallet-signed DAMM v2 migration only when the DBC pool is eligible on chain. |
+| `GET /api/meteora/dlmm/plan?dbcPool=…` | Read the expected post-graduation DLMM pool, preset and DAMM v2 reference price. |
+| `POST /api/meteora/dlmm/pool/build` | Build creator-paid unsigned DLMM pool creation for `{dbcPool, payer}`. |
+| `POST /api/meteora/dlmm/link/challenge`, `POST /api/meteora/dlmm/link` | Issue and verify creator-signed, short-lived pool linkage after confirming the derived pool on chain. |
+| `GET /api/meteora/dlmm/status?dbcPool=…&wallet=…` | Read the linked pool and optional wallet-owned positions from Meteora. |
+| `POST /api/meteora/dlmm/position/build` | Build an unsigned wallet deposit with locally generated position signer. |
+| `POST /api/meteora/dlmm/position/remove/build` | Build the wallet owner's full withdrawal, fee claim and position close transactions. |
 
-```text
-http://127.0.0.1:8787
-```
+`POST /api/meteora/launches` stores the full mint in its route key, allowing duplicate token tickers. A launch page uses the mint, config and pool addresses from the verified record, never a build-time token constant. The public API does not accept caller-supplied trade events as proof of campaign eligibility. After a confirmed wallet trade, the browser submits its signature for finalization checks; failed or delayed verification never changes the outcome of the already confirmed trade, and pending signatures are retried from browser storage. The public activity panel counts only these verified, submitted signatures. It does not claim to index every trade on Solana.
 
-Run web and API together:
+Prior Raydium and Torque routes are retained in source for migration history but return `410` by default. Set `TOLUVA_LEGACY_API_ENABLED=true` only when intentionally running the prior project in an isolated environment. The previous API contract is archived in [torque-original-api.md](torque-original-api.md).
 
-```bash
-npm run dev:all
-```
+## Current limits
 
-## Environment
-
-- `TOLUVA_API_PORT`: API port, default `8787`.
-- `TOLUVA_REGISTRY_PATH`: optional path to a runtime registry JSON file. Default is ignored local file `data/local-launch-registry.json`.
-- `TOLUVA_ALLOWED_ORIGIN`: CORS origin, default `*`.
-- `VITE_TOLUVA_API_URL`: frontend API URL, default `http://127.0.0.1:8787`.
-- `SOLANA_CLUSTER`: server Solana cluster, default `devnet`.
-- `SOLANA_RPC_URL`: server Solana RPC URL, default `https://api.devnet.solana.com`.
-- `SOLANA_STATUS_TIMEOUT_MS`: timeout for the status probe, default `4000`.
-- `TORQUE_API_KEY` or `TORQUE_EVENT_API_KEY`: server-side key for Torque event ingestion.
-- `TORQUE_EVENT_INGEST_URL`: event ingest URL, default `https://ingest.torque.so/events`.
-- `TORQUE_PROJECT_ID`: optional project identifier included in event payload data.
-- `TORQUE_STRICT_EVENTS`: when `true`, failed Torque emission fails `POST /api/events`; default records local receipts anyway.
-- `RAYDIUM_CLUSTER`: Raydium network, default follows Solana cluster.
-- `RAYDIUM_LAUNCHPAD_PROGRAM_ID`: LaunchLab program override.
-- `RAYDIUM_PLATFORM_ID`: optional LaunchLab platform config public key.
-- `RAYDIUM_QUOTE_MINT`: optional quote mint override for launch prep.
-- `RAYDIUM_CURVE_TYPE`: LaunchLab config curve type, default `0`.
-- `RAYDIUM_CONFIG_INDEX`: LaunchLab config index, default `0`.
-
-## Endpoints
-
-`GET /api/health`
-
-Returns service health.
-
-`GET /api/registry`
-
-Returns the full registry: workspace, launches, campaigns, live events, analytics, event receipts, and campaign results.
-
-The committed seed registry starts empty in `data/launch-registry.json`. Runtime writes go to `data/local-launch-registry.json` by default, which is ignored by git. Dashboard tables and analytics should only reflect records written by the local API, Torque event receipts captured by `POST /api/events`, and Raydium pool state attached to launch records. For launches with `raydium.poolId`, this route attempts to refresh live Raydium LaunchLab pool state from the configured RPC before returning.
-
-`GET /api/integrations/status`
-
-Returns sanitized integration readiness for Torque, Solana, and Raydium. Secrets are never returned. If `@solana/web3.js` is not installed yet, Solana status reports `missing_dependency`.
-
-`GET /api/torque/event-schemas`
-
-Returns the custom event schemas Toluva expects to create and attach in Torque before event ingestion can succeed.
-
-`GET /api/launches`
-
-Returns `{ launches }`.
-
-`POST /api/launches`
-
-Creates a draft launch record.
-
-```json
-{
-  "sym": "DEMO",
-  "name": "Demo Token",
-  "status": "draft"
-}
-```
-
-`GET /api/campaigns`
-
-Returns `{ campaigns }`.
-
-`POST /api/campaigns`
-
-Creates a campaign record.
-
-```json
-{
-  "type": "Early Buyer",
-  "launch": "DEMO",
-  "pool": "1.0",
-  "accent": "pink"
-}
-```
-
-`GET /api/campaigns/:id/results`
-
-Returns campaign results if present, otherwise a stub with `claimStatus: "pending_torque_integration"`.
-
-`POST /api/events`
-
-Attempts Torque custom-event emission, records the request/receipt/error, and prepends a display event to the live activity stream. Without Torque credentials, the event is still recorded with `status: "torque_skipped"`.
-Payloads are validated against `server/services/torque-event-catalog.js` before Torque ingest; missing required schema fields return `400`.
-
-```json
-{
-  "type": "token_launch_created",
-  "token": "DEMO",
-  "wallet": "9c4Ax01a3D7Hpk5fb3sR4nN8XzLm8wYqp",
-  "launchId": "demo-launch",
-  "payload": {
-    "source": "demo",
-    "poolState": "demo-pool-state",
-    "verified": true
-  }
-}
-```
-
-Torque request shape generated by the backend:
-
-```json
-{
-  "userPubkey": "9c4Ax01a3D7Hpk5fb3sR4nN8XzLm8wYqp",
-  "timestamp": 1777670400000,
-  "eventName": "token_launch_created",
-  "data": {
-    "source": "toluva",
-    "token": "DEMO",
-    "launch_id": "demo-launch",
-    "pool_state": "demo-pool-state",
-    "campaign_id": "optional",
-    "amount": 1,
-    "verified": true
-  }
-}
-```
-
-Torque requires every field declared on a custom event schema to be present in the ingested event. It also currently caps string fields at 5 per custom event schema.
-
-`POST /api/launches/:sym/buy-events`
-
-Records a real submitted buy transaction against a launch and emits the correct Torque custom event. The first buy for a wallet/token pair becomes `first_buy_completed`; subsequent buys become `buy_completed`.
-
-```json
-{
-  "wallet": "buyer-wallet-public-key",
-  "poolState": "raydium-launchlab-pool",
-  "amount": 10000000,
-  "amountUsd": 0,
-  "txSignature": "devnet-buy-transaction-signature"
-}
-```
-
-`GET /api/raydium/launchlab/status`
-
-Returns LaunchLab config and SDK readiness. Optional query parameter reads live pool state from the configured Solana RPC:
-
-```text
-poolId=<launchlab-pool-public-key>
-```
-
-`POST /api/raydium/launches/prepare`
-
-Validates the launch fields needed before building a Raydium `createLaunchpad` transaction. This endpoint does not submit transactions yet.
-
-```json
-{
-  "name": "Demo Token",
-  "symbol": "DEMO",
-  "uri": "https://example.com/demo-token.json",
-  "migrateType": "cpmm",
-  "supply": "1000000000000000",
-  "totalSellA": "793100000000000",
-  "totalFundRaisingB": "85000000000"
-}
-```
-
-`POST /api/raydium/launches/transaction-plan`
-
-Builds the wallet-signed transaction plan for a Raydium LaunchLab launch without holding private keys on the backend. It derives LaunchLab PDAs, validates raw-unit integer amounts, and reports whether the client has enough inputs to call `raydium.launchpad.createLaunchpad`.
-
-```json
-{
-  "name": "Demo Token",
-  "symbol": "DEMO",
-  "uri": "https://example.com/demo-token.json",
-  "creatorWallet": "creator-wallet-public-key",
-  "mintA": "new-token-mint-public-key",
-  "buyAmount": "10000000",
-  "supply": "1000000000000000",
-  "totalSellA": "793100000000000",
-  "totalFundRaisingB": "85000000000"
-}
-```
-
-If `platformId` or `RAYDIUM_PLATFORM_ID` is missing, the route returns `readyToBuildTransaction: false` with `missingToBuild`.
-
-Devnet defaults are built in:
-
-- LaunchLab program: `DRay6fNdQ5J82H7xV6uq2aV3mNrUZ1J4PgSKsWgptcm6`
-- Platform: `2Jx4KTDrVSdWNazuGpcA8n3ZLTRGGBDxAWhuKe2Xcj2a`
-- Config: `7ZR4zD7PYfY2XxoG1Gxcy2EgEeGYrpxrwzPuwdUBssEt`
-
-`POST /api/raydium/launches/build-transaction`
-
-Builds unsigned Raydium LaunchLab transaction payloads for a wallet client to sign. Request shape matches `transaction-plan`.
-
-Response includes:
-
-```json
-{
-  "mode": "wallet_signed_transaction_build",
-  "readyToSubmit": true,
-  "transactionFormat": "base64",
-  "transactions": [
-    {
-      "index": 0,
-      "version": 0,
-      "base64": "base64-serialized-transaction",
-      "requiredSigners": ["creator-wallet-public-key", "mint-public-key"]
-    }
-  ],
-  "extInfo": {
-    "poolId": "derived-launchlab-pool"
-  }
-}
-```
-
-The backend does not sign or submit this transaction. The creator wallet and mint keypair must sign client-side before submission.
-
-`POST /api/raydium/launches/build-buy-transaction`
-
-Builds unsigned Raydium LaunchLab buy transaction payloads for a wallet client to sign.
-
-```json
-{
-  "buyerWallet": "buyer-wallet-public-key",
-  "mintA": "launched-token-mint",
-  "buyAmount": "10000000"
-}
-```
-
-The frontend submits the signed transaction to devnet, then calls `POST /api/launches/:sym/buy-events` so the buy is recorded locally and ingested by Torque.
-
-Dashboard flow:
-
-1. Open `/dashboard/launches`.
-2. Connect an injected Solana wallet, not the demo wallet.
-3. Click `New launch`.
-4. Submit the Raydium devnet form.
-5. The browser generates the mint keypair, signs the unsigned transaction with the mint keypair, asks the connected wallet to sign, submits to devnet, records the launch with `POST /api/launches`, and emits `token_launch_created` with `POST /api/events`.
-6. Use `Buy 0.01 SOL` on a pool-backed launch to submit a real Raydium LaunchLab buy and emit `first_buy_completed` or `buy_completed`.
+New config, pool, swap, migration and DLMM builders are devnet-only. The Toluva-owned [pilots](meteora-proof.md) verified a DBC config, pool, buys, a sell on an active curve, and DAMM v2 migration with position ownership and locks on chain. Finalized buy and sell signatures pass the trade verifier. The two-checkpoint leaderboard recorded a creator-wallet follow-up more than 24 chain hours after entry, but independent wallet participation remains open. Funded campaign eligibility and reward claims remain open. [Metadata hosting](metadata-hosting.md) has been used for a signed token launch. The [DLMM path](dlmm-liquidity-v1.md) has local tests and a simulated unsigned pool creation; it has no confirmed wallet-signed pool, deposit or withdrawal yet.

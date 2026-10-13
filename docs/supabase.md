@@ -35,7 +35,7 @@ npm install @supabase/supabase-js
 |---|---|
 | `launches` | One row per token launch. Keyed by `sym`. |
 | `campaigns` | Torque campaigns attached to launches. |
-| `event_receipts` | Every emitted event with Torque request/receipt. |
+| `event_receipts` | Torque events, verified DBC swaps, and immutable Conviction balance observations. The latter two use deterministic IDs and can be written only by server verification code. |
 | `campaign_results` | Leaderboard and claim status per campaign. |
 
 ## Fallback Behaviour

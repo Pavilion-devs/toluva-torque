@@ -1,5 +1,3 @@
-const DEMO_ADDRESS = "9c4Ax01a3D7Hpk5fb3sR4nN8XzLm8wYqp";
-
 function getProvider() {
   if (typeof window === "undefined") {
     return null;
@@ -13,7 +11,7 @@ export function getInjectedWalletProvider() {
 }
 
 function providerName(provider) {
-  if (!provider) return "Demo wallet";
+  if (!provider) return "Solana wallet";
   if (provider.isPhantom) return "Phantom";
   if (provider.isBackpack) return "Backpack";
   if (provider.isSolflare) return "Solflare";
@@ -39,11 +37,7 @@ export async function connectWallet() {
   const provider = getProvider();
 
   if (!provider?.connect) {
-    return {
-      address: DEMO_ADDRESS,
-      walletName: "Demo wallet",
-      source: "demo",
-    };
+    throw new Error("Install a Solana wallet such as Phantom, Backpack, or Solflare to connect.");
   }
 
   const response = await provider.connect();

@@ -3,12 +3,15 @@ import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { getLaunchFilters, refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
+import { getJson, postJson } from "../../../lib/toluvaApi";
+import { friendlyError } from "../../../lib/userErrors";
 
 const statusMap = {
   bonding:   { label: "Bonding",   pill: "progress"  },
   migrating: { label: "Migrating", pill: "progress"  },
   migrated:  { label: "Migrated",  pill: "completed" },
   draft:     { label: "Draft",     pill: "pending"   },
+  unknown:   { label: "Status unavailable", pill: "pending" },
 };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -140,13 +143,14 @@ function FilterDropdown({ filters, active, onChange }) {
 
 // ─── image dropzone ───────────────────────────────────────────────────────────
 
-function ImageDropzone({ value, onChange, error }) {
+function ImageDropzone({ value, onChange, error, disabled = false }) {
   const inputRef = React.useRef(null);
   const [hover, setHover] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [localError, setLocalError] = React.useState(null);
 
   async function handleFile(file) {
+    if (disabled) return;
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setLocalError("Please upload an image file.");
@@ -160,6 +164,9 @@ function ImageDropzone({ value, onChange, error }) {
     setLocalError(null);
     try {
       const dataUrl = await fileToCompressedDataUrl(file, 512, 0.85);
+      if (Math.floor((dataUrl.length - "data:image/jpeg;base64,".length) * 3 / 4) > 256 * 1024) {
+        throw new Error("Processed image is over 256 KB. Choose a smaller image.");
+      }
       onChange(dataUrl);
     } catch (e) {
       setLocalError(e instanceof Error ? e.message : "Could not process image.");
@@ -172,19 +179,19 @@ function ImageDropzone({ value, onChange, error }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-dim)" }}>Token image</span>
       <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setHover(true); }}
+        onClick={() => { if (!disabled) inputRef.current?.click(); }}
+        onDragOver={(e) => { e.preventDefault(); if (!disabled) setHover(true); }}
         onDragLeave={() => setHover(false)}
-        onDrop={(e) => { e.preventDefault(); setHover(false); handleFile(e.dataTransfer.files?.[0]); }}
+        onDrop={(e) => { e.preventDefault(); setHover(false); if (!disabled) handleFile(e.dataTransfer.files?.[0]); }}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+        onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) inputRef.current?.click(); }}
         style={{
           width: "100%", aspectRatio: "1 / 1",
           borderRadius: 16, overflow: "hidden", position: "relative",
           border: `2px dashed ${hover ? "var(--green)" : value ? "transparent" : "var(--line)"}`,
           background: value ? "transparent" : hover ? "var(--green-pale)" : "var(--card-muted)",
-          cursor: "pointer", display: "grid", placeItems: "center",
+          cursor: disabled ? "default" : "pointer", display: "grid", placeItems: "center",
           transition: "border-color 160ms, background 160ms",
         }}
       >
@@ -193,7 +200,8 @@ function ImageDropzone({ value, onChange, error }) {
             <img src={value} alt="Token preview" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onChange(null); }}
+              onClick={(e) => { e.stopPropagation(); if (!disabled) onChange(null); }}
+              disabled={disabled}
               style={{
                 position: "absolute", top: 8, right: 8,
                 width: 28, height: 28, borderRadius: "50%",
@@ -235,7 +243,8 @@ function ImageDropzone({ value, onChange, error }) {
           ref={inputRef}
           type="file"
           accept="image/*"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          disabled={disabled}
+          onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }}
           style={{ display: "none" }}
         />
       </div>
@@ -275,61 +284,195 @@ const monoInputStyle = { ...inputStyle, fontFamily: "'Geist Mono', monospace" };
 
 // ─── launch form (modal body) ─────────────────────────────────────────────────
 
-function NewLaunchForm({ wallet, onClose, onLaunched }) {
+function NewLaunchForm({ wallet, onClose, onLaunched, initialDraft }) {
   const [form, setForm] = React.useState(() => ({
-    name: "",
-    symbol: `TLV${Math.floor(Math.random() * 900 + 100)}`,
-    description: "",
-    image: null,
-    uri: "https://example.com/toluva-devnet-token.json",
-    buyAmount: "10000000",
-    supply: "1000000000000000",
-    totalSellA: "793100000000000",
-    totalFundRaisingB: "85000000000",
+    name: initialDraft?.name || "",
+    symbol: initialDraft?.symbol || "",
+    description: initialDraft?.description || "",
+    imageDataUrl: null,
+    uri: "",
+    migrationThresholdSol: initialDraft?.migrationThresholdSol || "5",
   }));
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
-  const [state, setState] = React.useState({ status: "idle", error: null, result: null, diagnostics: null });
+  const [operatorPrompt, setOperatorPrompt] = React.useState("");
+  const [operatorResult, setOperatorResult] = React.useState(null);
+  const [operatorBusy, setOperatorBusy] = React.useState(false);
+  const [operatorError, setOperatorError] = React.useState("");
+  const [terms, setTerms] = React.useState(null);
+  const [hosting, setHosting] = React.useState(null);
+  const [metadataMode, setMetadataMode] = React.useState("hosted");
+  const [pending, setPending] = React.useState(null);
+  const [state, setState] = React.useState({ status: "idle", error: null, result: null, stage: null });
 
-  const update = (field) => (e) => setForm((c) => ({ ...c, [field]: e.target.value }));
-  const setImage = (image) => setForm((c) => ({ ...c, image }));
+  const update = (field) => (e) => updateDetail(field, e.target.value);
+  const draftKey = wallet.address ? `toluva:dbc-draft:${wallet.address}` : null;
+  const activePending = pending?.draftKey === draftKey ? pending : null;
+
+  function updateDetail(field, value) {
+    setForm((current) => {
+      const clearHostedUri = ["name", "symbol", "description", "imageDataUrl"].includes(field)
+        && activePending?.hostedMetadata?.uri === current.uri;
+      return {
+        ...current,
+        [field]: value,
+        uri: field === "uri" ? value : clearHostedUri ? "" : current.uri,
+      };
+    });
+    if (activePending?.hostedMetadata && ["name", "symbol", "description", "imageDataUrl"].includes(field)) {
+      setPending((current) => ({ ...current, hostedMetadata: null }));
+    }
+  }
+
+  function switchMetadataMode(mode) {
+    if (mode === metadataMode) return;
+    setMetadataMode(mode);
+    setForm((current) => ({ ...current, uri: "" }));
+    if (activePending?.hostedMetadata) setPending((current) => ({ ...current, hostedMetadata: null }));
+  }
+
+  React.useEffect(() => {
+    setPending(null);
+    if (!draftKey) return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(draftKey) || "null");
+      if (saved?.form && (saved?.config || saved?.proof || saved?.hostedMetadata)) {
+        setForm({ description: "", imageDataUrl: null, ...saved.form });
+        setPending({ ...saved, draftKey });
+        setMetadataMode(saved.metadataMode === "external" ? "external" : "hosted");
+      }
+    } catch { /* Ignore malformed local draft. */ }
+  }, [draftKey]);
+
+  React.useEffect(() => {
+    let live = true;
+    getJson("/api/meteora/metadata/status")
+      .then((data) => {
+        if (!live) return;
+        setHosting(data.hosting);
+        if (!data.hosting?.available) setMetadataMode("external");
+      })
+      .catch(() => { if (live) { setHosting({ available: false }); setMetadataMode("external"); } });
+    return () => { live = false; };
+  }, []);
+
+  React.useEffect(() => {
+    if (!draftKey || !pending || pending.draftKey !== draftKey) return;
+    try { window.localStorage.setItem(draftKey, JSON.stringify({ ...pending, form, metadataMode })); }
+    catch { /* The live form still works if browser storage is unavailable. */ }
+  }, [draftKey, pending, form, metadataMode]);
+
+  React.useEffect(() => {
+    let live = true;
+    setTerms(null);
+    getJson(`/api/meteora/terms?migrationThresholdSol=${encodeURIComponent(form.migrationThresholdSol)}`)
+      .then((data) => { if (live) setTerms(data.terms || null); })
+      .catch(() => { if (live) setTerms(null); });
+    return () => { live = false; };
+  }, [form.migrationThresholdSol]);
+
+  function savePending(next) {
+    setPending({ ...next, draftKey });
+  }
+
+  async function prepareOperatorDraft() {
+    setOperatorBusy(true);
+    setOperatorError("");
+    setOperatorResult(null);
+    try {
+      const result = await postJson("/api/operator/draft", { prompt: operatorPrompt });
+      setOperatorResult(result);
+    } catch (error) {
+      setOperatorError(error?.payload?.error || "The launch draft could not be prepared. Please try again or use the form below.");
+    } finally {
+      setOperatorBusy(false);
+    }
+  }
+
+  function useOperatorDraft() {
+    if (!operatorResult || operatorResult.unsupportedRequests?.length || activePending?.config || activePending?.proof) return;
+    setForm((current) => ({ ...current,
+      name: operatorResult.draft.name || current.name,
+      symbol: operatorResult.draft.symbol || current.symbol,
+      description: operatorResult.draft.description || current.description,
+      migrationThresholdSol: operatorResult.draft.migrationThresholdSol,
+      uri: activePending?.hostedMetadata?.uri === current.uri ? "" : current.uri,
+    }));
+    if (activePending?.hostedMetadata) setPending((current) => ({ ...current, hostedMetadata: null }));
+    setOperatorResult(null);
+  }
 
   async function submit(e) {
     e.preventDefault();
-    if (!form.name.trim()) {
-      setState({ status: "error", error: "Token name is required.", result: null, diagnostics: null });
+    if (!form.name.trim() || !/^[A-Za-z0-9]{2,10}$/.test(form.symbol.trim())) {
+      setState({ status: "error", error: "Enter a token name and a 2–10 character letter/number symbol.", result: null });
       return;
     }
-    setState({ status: "submitting", error: null, result: null, diagnostics: null });
+    if (metadataMode === "external" && !/^https:\/\//.test(form.uri.trim())) {
+      setState({ status: "error", error: "Enter a publicly hosted HTTPS token metadata JSON URI.", result: null });
+      return;
+    }
+    if (metadataMode === "hosted" && !hosting?.available && !activePending?.proof) {
+      setState({ status: "error", error: "Toluva metadata hosting is unavailable. Use an existing public HTTPS metadata URI.", result: null });
+      return;
+    }
+    setState({ status: "submitting", error: null, result: null, stage: "Preparing launch…" });
     try {
-      const { launchDevnetToken } = await import("../../../lib/raydiumLaunchlab");
-      const result = await launchDevnetToken({ wallet, launch: form });
+      const { launchMeteoraToken, publishMeteoraMetadata, registerConfirmedMeteoraLaunch } = await import("../../../lib/meteoraDbc");
+      let launchForm = form;
+      let hostedMetadata = activePending?.hostedMetadata || null;
+      if (!activePending?.proof && metadataMode === "hosted" && (!hostedMetadata || hostedMetadata.uri !== form.uri)) {
+        const published = await publishMeteoraMetadata({
+          wallet,
+          name: form.name,
+          symbol: form.symbol,
+          description: form.description,
+          imageDataUrl: form.imageDataUrl,
+          onStage: (stage) => setState((current) => ({ ...current, stage })),
+        });
+        launchForm = { ...form, uri: published.uri };
+        hostedMetadata = { uri: published.uri, image: published.image };
+        setForm(launchForm);
+        savePending({ ...activePending, form: launchForm, metadataMode, hostedMetadata });
+      }
+      const result = activePending?.proof
+        ? { ...(await registerConfirmedMeteoraLaunch(activePending.proof)), ...activePending.proof }
+        : await launchMeteoraToken({
+          wallet,
+          launch: launchForm,
+          configAddress: activePending?.config?.address,
+          onStage: (stage) => setState((current) => ({ ...current, stage })),
+          onConfigConfirmed: (created) => savePending({ form: launchForm, metadataMode, hostedMetadata, config: created }),
+          onPoolConfirmed: (proof) => savePending({ form: launchForm, metadataMode, hostedMetadata, config: { address: proof.config }, proof }),
+        });
+      if (draftKey) window.localStorage.removeItem(draftKey);
+      setPending(null);
       await refreshRegistry({ force: true });
-      setState({ status: "submitted", error: null, result, diagnostics: result.diagnostics || null });
+      setState({ status: "submitted", error: null, result, stage: null });
       onLaunched?.(result);
     } catch (err) {
       setState({
         status: "error",
-        error: err instanceof Error ? err.message : "Launch failed.",
+        error: friendlyError(err, "launch"),
+        errorSignature: err?.signature || null,
         result: null,
-        diagnostics: err?.diagnostics || null,
+        stage: null,
       });
     }
   }
 
-  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected";
+  const disabled = state.status === "submitting" || !wallet.connected || wallet.source !== "injected" || !terms || !hosting;
 
   return (
     <form className="card" onSubmit={submit} style={{ padding: 28 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--green)", letterSpacing: "0.18em", textTransform: "uppercase" }}>
-            Raydium devnet
+            Meteora DBC · devnet
           </div>
           <h3 style={{ margin: "4px 0 4px", fontSize: 22, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--ink)" }}>
-            New LaunchLab token
+            New conviction launch
           </h3>
           <div style={{ fontSize: 13, color: "var(--ink-dim)", maxWidth: 480, lineHeight: 1.5 }}>
-            Generates a mint keypair in-browser, asks your wallet to sign, and submits to devnet. Torque telemetry fires on launch.
+            Create your own launch config and token pool with your wallet. Review the economics before signing.
           </div>
         </div>
         <button
@@ -348,93 +491,113 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
         </button>
       </div>
 
-      <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "200px 1fr", gap: 22 }}>
-        <ImageDropzone value={form.image} onChange={setImage} />
-
+      <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <section className="operator-draft-panel" aria-label="Launch Operator">
+            <div className="operator-eyebrow">Launch Operator</div>
+            <h4>Describe your launch</h4>
+            <p>Turn an idea into an editable Conviction v1 plan. You review the terms and approve every wallet step.</p>
+            <textarea
+              value={operatorPrompt}
+              onChange={(event) => setOperatorPrompt(event.target.value)}
+              maxLength={500}
+              rows={3}
+              disabled={operatorBusy || state.status === "submitting" || Boolean(activePending?.config)}
+              placeholder="Launch a token called Aurora with symbol AURA and a 5 SOL graduation target…"
+              style={{ ...inputStyle, resize: "vertical" }}
+            />
+            <div className="operator-draft-actions">
+              <span>{operatorPrompt.length}/500 · Your description is sent to the AI provider when AI drafting is available.</span>
+              <button type="button" className="btn ghost" onClick={prepareOperatorDraft} disabled={operatorBusy || state.status === "submitting" || Boolean(activePending?.config) || operatorPrompt.trim().length < 12}>
+                {operatorBusy ? "Preparing…" : "Prepare draft"}
+              </button>
+            </div>
+            {activePending?.config && <p>A launch is already in progress. Complete it before preparing another draft.</p>}
+            {operatorError && <div className="operator-notice error" role="alert">{operatorError}</div>}
+            {operatorResult && (
+              <div className="operator-result">
+                <strong>{operatorResult.mode === "ai" ? "AI prepared draft" : "Guided draft"}</strong>
+                <span>{operatorResult.draft.name || "Name needed"} · {operatorResult.draft.symbol || "Symbol needed"} · {operatorResult.draft.migrationThresholdSol} SOL target</span>
+                <span>Fixed terms: 1% DBC fee · 0.3% DAMM v2 fee · 50% permanent liquidity lock · SOL quote on devnet.</span>
+                {operatorResult.missing?.length > 0 && <span>Still needed: {operatorResult.missing.join(", ")}.</span>}
+                {operatorResult.assumptions?.map((item) => <span key={item}>{item}</span>)}
+                {operatorResult.unsupportedRequests?.length > 0 && <div className="operator-notice error">This request includes unsupported terms: {operatorResult.unsupportedRequests.join(" ")} Please revise your description.</div>}
+                <button type="button" className="btn primary" onClick={useOperatorDraft} disabled={operatorResult.unsupportedRequests?.length > 0}>Use this draft</button>
+                <small>No token or transaction has been created.</small>
+              </div>
+            )}
+          </section>
           <Field label="Token name">
-            <input value={form.name} onChange={update("name")} placeholder="e.g. Toluva Devnet Token" style={inputStyle} />
+            <input value={form.name} onChange={update("name")} maxLength={32} disabled={state.status === "submitting"} placeholder="Your token name" style={inputStyle} />
           </Field>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Symbol" hint="3–6 characters">
-              <input value={form.symbol} onChange={update("symbol")} maxLength={10} style={{ ...monoInputStyle, textTransform: "uppercase" }} />
-            </Field>
-            <Field label="Metadata URI" hint="Off-chain JSON">
-              <input value={form.uri} onChange={update("uri")} style={monoInputStyle} />
-            </Field>
+          <Field label="Symbol" hint="2–10 letters or numbers">
+            <input value={form.symbol} onChange={update("symbol")} maxLength={10} disabled={state.status === "submitting"} style={{ ...monoInputStyle, textTransform: "uppercase" }} />
+          </Field>
+
+          <div style={{ display: "grid", gap: 10, padding: 14, border: "1px solid var(--line)", borderRadius: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>Token metadata</div>
+            {hosting?.available ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className={`btn ${metadataMode === "hosted" ? "primary" : "ghost"}`} disabled={state.status === "submitting"} onClick={() => switchMetadataMode("hosted")}>Publish with Toluva</button>
+                <button type="button" className={`btn ${metadataMode === "external" ? "primary" : "ghost"}`} disabled={state.status === "submitting"} onClick={() => switchMetadataMode("external")}>Use existing URI</button>
+              </div>
+            ) : <div style={{ fontSize: 12, color: "var(--muted)" }}>{hosting ? hosting.message || "Supply a public HTTPS token JSON URI." : "Checking metadata hosting…"}</div>}
+
+            {metadataMode === "hosted" && hosting?.available ? (
+              <div className="dbc-metadata-grid">
+                <ImageDropzone value={form.imageDataUrl} onChange={(value) => updateDetail("imageDataUrl", value)} disabled={state.status === "submitting"} />
+                <div style={{ display: "grid", gap: 10 }}>
+                  <Field label="Description" hint="Up to 280 characters; published with the token details">
+                    <textarea value={form.description} onChange={update("description")} maxLength={280} rows={4} disabled={state.status === "submitting"} placeholder="What is this token for?" style={{ ...inputStyle, resize: "vertical" }} />
+                  </Field>
+                  {form.uri && activePending?.hostedMetadata?.uri === form.uri && <a href={form.uri} target="_blank" rel="noreferrer" style={{ fontSize: 11, overflowWrap: "anywhere", color: "var(--green)" }}>Published metadata ↗</a>}
+                  <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>Your wallet will approve public metadata first, then the DBC config and token launch. Published details are content-addressed and cannot be edited at the same URL.</div>
+                </div>
+              </div>
+            ) : (
+              <Field label="Metadata URI" hint="Public HTTPS token JSON containing your token name and symbol">
+                <input value={form.uri} onChange={update("uri")} disabled={state.status === "submitting"} placeholder="https://…/token.json" style={monoInputStyle} />
+              </Field>
+            )}
           </div>
 
-          <Field label="Description" hint="Optional · 1–2 sentences shown on the token page">
-            <textarea
-              value={form.description}
-              onChange={update("description")}
-              rows={3}
-              placeholder="What is this token about?"
-              style={{ ...inputStyle, resize: "vertical", minHeight: 70, fontFamily: "'Geist', sans-serif" }}
-            />
-          </Field>
         </div>
       </div>
 
-      {/* Advanced */}
-      <div style={{ marginTop: 18 }}>
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((o) => !o)}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            background: "transparent", border: 0, padding: "6px 0", cursor: "pointer",
-            fontSize: 12, fontWeight: 600, color: "var(--ink-dim)",
-            fontFamily: "'Geist', sans-serif",
-          }}
-        >
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" style={{ transform: advancedOpen ? "rotate(90deg)" : "none", transition: "transform 160ms" }}>
-            <path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Advanced parameters
-        </button>
-
-        {advancedOpen && (
-          <div style={{
-            marginTop: 12, padding: 16, borderRadius: 14, border: "1px solid var(--line)",
-            background: "var(--card-muted)",
-            display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12,
-          }}>
-            <Field label="Buy amount" hint="Lamports the creator pre-buys at launch">
-              <input value={form.buyAmount} onChange={update("buyAmount")} style={monoInputStyle} />
-            </Field>
-            <Field label="Supply" hint="Total token supply, with decimals">
-              <input value={form.supply} onChange={update("supply")} style={monoInputStyle} />
-            </Field>
-            <Field label="Sell A" hint="Tokens sold along the bonding curve">
-              <input value={form.totalSellA} onChange={update("totalSellA")} style={monoInputStyle} />
-            </Field>
-            <Field label="Raise B" hint="Quote raised before migration">
-              <input value={form.totalFundRaisingB} onChange={update("totalFundRaisingB")} style={monoInputStyle} />
-            </Field>
+      <div style={{ marginTop: 18, padding: 16, borderRadius: 14, border: "1px solid var(--line)", background: "var(--card-muted)", display: "grid", gap: 12 }}>
+        <Field label="Graduation target (SOL)" hint="Quote raised before DAMM v2 migration; devnet range 1–100 SOL">
+          <input type="number" min="1" max="100" step="0.1" value={form.migrationThresholdSol} onChange={update("migrationThresholdSol")} disabled={state.status === "submitting" || Boolean(activePending?.config)} style={monoInputStyle} />
+        </Field>
+        {terms ? (
+          <div style={{ fontSize: 12, lineHeight: 1.7, color: "var(--ink-dim)" }}>
+            <strong>Conviction v{terms.version}</strong> · {terms.tokenSupply.toLocaleString()} immutable tokens · {terms.migrationSupplyPercentage}% supply reserved for migration · {terms.curveFeeBps / 100}% DBC fee · {terms.migratedPoolFeeBps / 100}% DAMM v2 fee · {terms.liquidity.creatorPermanentLockedPercentage}% of migrated liquidity permanently locked · {terms.liquidity.creatorUnlockedPercentage}% creator liquidity · no Toluva fee.
+            <div>Fee claimer and leftover receiver: <span style={{ fontFamily: "'Geist Mono', monospace" }}>{wallet.address || "your connected wallet"}</span></div>
           </div>
-        )}
+        ) : <span style={{ fontSize: 12, color: "var(--muted)" }}>Connect to the API to review launch terms.</span>}
       </div>
 
       {/* States */}
-      {wallet.connected && wallet.source !== "injected" && (
+      {!wallet.connected && (
         <Banner tone="amber" style={{ marginTop: 16 }}>
-          Demo wallet cannot sign LaunchLab transactions. Connect Phantom, Backpack, or another injected Solana wallet.
+          Connect Phantom, Backpack, or another injected Solana wallet to sign a devnet launch.
         </Banner>
       )}
       {state.status === "submitting" && (
         <Banner tone="indigo" style={{ marginTop: 16 }}>
-          Checking devnet wallet, simulating the Raydium transaction, then requesting wallet approval.
+          {state.stage || "Preparing your Meteora launch…"}
         </Banner>
       )}
       {state.error && (
-        <Banner tone="rose" style={{ marginTop: 16 }}>{state.error}</Banner>
+        <Banner tone="rose" style={{ marginTop: 16 }}>
+          {state.error}
+          {state.errorSignature && <div style={{ marginTop: 5 }}><a href={`https://explorer.solana.com/tx/${state.errorSignature}?cluster=devnet`} target="_blank" rel="noreferrer">Check transaction status ↗</a></div>}
+        </Banner>
       )}
       {state.result && (
         <Banner tone="emerald" style={{ marginTop: 16 }}>
           <div style={{ fontWeight: 600 }}>Submitted to devnet</div>
-          <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5, marginTop: 3 }}>Pool {state.result.poolId}</div>
+          <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5, marginTop: 3 }}>Pool {state.result.pool}</div>
           <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11.5 }}>Tx {state.result.signature}</div>
         </Banner>
       )}
@@ -453,7 +616,7 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
           className="btn primary"
           style={disabled ? { opacity: 0.55, cursor: "not-allowed" } : undefined}
         >
-          {state.status === "submitting" ? "Submitting…" : "Sign & launch on devnet"}
+          {state.status === "submitting" ? "Submitting…" : activePending?.proof ? "Finish registration" : activePending?.config ? "Resume token launch" : metadataMode === "hosted" && !form.uri ? "Publish details & launch" : "Create config & launch"}
         </button>
       </div>
     </form>
@@ -514,10 +677,27 @@ function GradientTile({ symbol }) {
   );
 }
 
+function launchAge(launch) {
+  if (!launch.createdAt) return launch.age || "Date unavailable";
+  const createdAt = new Date(launch.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return launch.age || "Date unavailable";
+  const elapsed = Math.max(0, Date.now() - createdAt.getTime());
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function LaunchCard({ launch }) {
-  const statusInfo = statusMap[launch.status] || { label: launch.status, pill: "pending" };
+  const knownStatus = statusMap[launch.status] || { label: "Status unavailable", pill: "pending" };
+  const statusInfo = launch.dbc?.liveStale && launch.status !== "unknown"
+    ? { ...knownStatus, label: `${knownStatus.label} · updating` }
+    : knownStatus;
   const progress = Math.max(0, Math.min(100, Number(launch.bonded) || 0));
-  const buyers = Number(launch.buyers) || 0;
+  const buyers = launch.dbc ? launch.dbc.activity?.trackedBuyers : Number(launch.buyers) || 0;
+  const ticker = launch.dbc?.symbol || launch.sym;
 
   function open() {
     navigate(`/launches/${encodeURIComponent(launch.sym)}`);
@@ -553,7 +733,7 @@ function LaunchCard({ launch }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
           />
         ) : (
-          <GradientTile symbol={launch.sym} />
+          <GradientTile symbol={ticker} />
         )}
         <span
           className={`status-pill ${statusInfo.pill}`}
@@ -577,9 +757,9 @@ function LaunchCard({ launch }) {
             fontFamily: "'Geist Mono', monospace", fontSize: 11, color: "var(--muted)",
             display: "flex", alignItems: "center", gap: 6,
           }}>
-            <span>${launch.sym}</span>
+            <span>${ticker}</span>
             <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--muted)" }} />
-            <span>{launch.age || "now"}</span>
+            <span>{launchAge(launch)}</span>
           </div>
         </div>
 
@@ -612,7 +792,9 @@ function LaunchCard({ launch }) {
               {progress.toFixed(progress < 10 ? 2 : 1)}%
             </span>
             <span style={{ color: "var(--muted)", fontWeight: 500 }}>
-              {buyers} buyer{buyers === 1 ? "" : "s"}
+              {launch.dbc
+                ? buyers === undefined ? "Activity unavailable" : `${buyers}${launch.dbc.activity?.complete === false ? "+" : ""} tracked buyer${buyers === 1 ? "" : "s"}`
+                : `${buyers} buyer${buyers === 1 ? "" : "s"}`}
             </span>
           </div>
         </div>
@@ -644,7 +826,7 @@ function EmptyState({ onCreate }) {
         No launches yet
       </div>
       <div style={{ fontSize: 13.5, color: "var(--ink-dim)", maxWidth: 360, lineHeight: 1.5 }}>
-        Launch a Raydium LaunchLab token on devnet to see it here. Every launch ships with growth campaigns attached.
+        Launch a Meteora DBC token on devnet to see it here.
       </div>
       <button type="button" className="btn primary" onClick={onCreate} style={{ marginTop: 6 }}>
         <svg viewBox="0 0 24 24" fill="none">
@@ -659,12 +841,23 @@ function EmptyState({ onCreate }) {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function LaunchesPage() {
-  const { registry } = useRegistry();
+  const { registry, loading, error } = useRegistry();
   const wallet = useWallet();
-  const launches = registry.launches || [];
+  const launches = (registry.launches || []).filter((launch) => launch.dbc?.pool);
   const [filter, setFilter] = React.useState("all");
-  const [showLaunchModal, setShowLaunchModal] = React.useState(false);
-  const filters = getLaunchFilters(registry);
+  const [handoffDraft] = React.useState(() => {
+    if (typeof window === "undefined") return null;
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("operator") !== "1") return null;
+    const name = (query.get("name") || "").slice(0, 32);
+    const symbol = (query.get("symbol") || "").slice(0, 10).toUpperCase();
+    const target = Number(query.get("targetSol"));
+    return { name, symbol: /^[A-Z0-9]{2,10}$/.test(symbol) ? symbol : "",
+      description: (query.get("description") || "").slice(0, 280),
+      migrationThresholdSol: Number.isFinite(target) && target >= 1 && target <= 100 ? String(target) : "5" };
+  });
+  const [showLaunchModal, setShowLaunchModal] = React.useState(Boolean(handoffDraft));
+  const filters = getLaunchFilters({ ...registry, launches });
   const visible = launches.filter((l) => filter === "all" || l.status === filter);
 
   return (
@@ -672,7 +865,7 @@ export default function LaunchesPage() {
       <div className="page-head">
         <div>
           <h1>Launches</h1>
-          <div className="sub">Every token you've shipped through Toluva.</div>
+          <div className="sub">Explore confirmed Meteora DBC launches made through Toluva.</div>
         </div>
         <div className="actions">
           <button type="button" className="btn primary" onClick={() => setShowLaunchModal(true)}>
@@ -684,10 +877,13 @@ export default function LaunchesPage() {
         </div>
       </div>
 
+      {error && <Banner tone="rose" style={{ marginBottom: 16 }}>{friendlyError(error, "data")}</Banner>}
+
       {showLaunchModal && (
         <Modal onClose={() => setShowLaunchModal(false)}>
           <NewLaunchForm
             wallet={wallet}
+            initialDraft={handoffDraft}
             onClose={() => setShowLaunchModal(false)}
             onLaunched={(result) => {
               setFilter("all");
@@ -700,7 +896,9 @@ export default function LaunchesPage() {
         </Modal>
       )}
 
-      {launches.length === 0 ? (
+      {loading && launches.length === 0 ? (
+        <div className="card" style={{ padding: 36, color: "var(--ink-dim)" }}>Loading launches…</div>
+      ) : launches.length === 0 ? (
         <EmptyState onCreate={() => setShowLaunchModal(true)} />
       ) : (
         <>

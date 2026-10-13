@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Toluva devnet every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=toluva-monitor.service
+
+[Install]
+WantedBy=timers.target

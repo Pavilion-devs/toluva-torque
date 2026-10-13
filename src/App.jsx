@@ -12,6 +12,8 @@ import AnalyticsPage from "./components/dashboard/pages/AnalyticsPage";
 import HistoryPage from "./components/dashboard/pages/HistoryPage";
 import EarlyBuyersPage from "./components/dashboard/pages/EarlyBuyersPage";
 import IncentivesPage from "./components/dashboard/pages/IncentivesPage";
+import LiquidityPage from "./components/dashboard/pages/LiquidityPage";
+import ConvictionPage from "./components/dashboard/pages/ConvictionPage";
 import SettingsPage from "./components/dashboard/pages/SettingsPage";
 import HelpPage from "./components/dashboard/pages/HelpPage";
 import { appClassName } from "./lib/stripeSource";
@@ -19,9 +21,12 @@ import { appClassName } from "./lib/stripeSource";
 const dashboardRoutes = {
   "/dashboard": DashboardOverview,
   "/launches": LaunchesPage,
-  "/campaigns": CampaignsPage,
+  "/liquidity": LiquidityPage,
+  "/conviction": ConvictionPage,
+  "/campaigns": ConvictionPage,
   "/analytics": AnalyticsPage,
   "/history": HistoryPage,
+  "/activity": HistoryPage,
   "/campaigns/early-buyers": EarlyBuyersPage,
   "/incentives": IncentivesPage,
   "/settings": SettingsPage,

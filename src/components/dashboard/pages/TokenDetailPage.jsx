@@ -3,7 +3,8 @@ import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
-import { postJson } from "../../../lib/toluvaApi";
+import { getJson, postJson } from "../../../lib/toluvaApi";
+import { friendlyError } from "../../../lib/userErrors";
 
 const BUY_PRESETS_SOL  = ["0.01", "0.05", "0.1", "0.5"];
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -484,8 +485,1082 @@ function StatTile({ label, value, sub }) {
   );
 }
 
+function savedDbcTrade(pool) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`toluva:dbc-trade:${pool}`) || "{}");
+    return {
+      direction: saved.direction === "sell" ? "sell" : "buy",
+      amount: typeof saved.amount === "string" && saved.amount.length <= 40 ? saved.amount : "",
+      slippageBps: [50, 100, 200, 500].includes(saved.slippageBps) ? saved.slippageBps : 100,
+      reviewRequested: saved.reviewRequested === true,
+    };
+  } catch {
+    return { direction: "buy", amount: "", slippageBps: 100, reviewRequested: false };
+  }
+}
+
+function pendingDbcProofs(pool) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`toluva:dbc-proof:${pool}`) || "[]");
+    return Array.isArray(saved) ? saved.filter((signature) => typeof signature === "string" && signature.length <= 90) : [];
+  } catch { return []; }
+}
+
+function OnchainRow({ label, address, kind = "address", explorer }) {
+  const [copied, setCopied] = React.useState(false);
+  const handleCopy = () => {
+    if (!address) return;
+    navigator.clipboard?.writeText(address).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--line)", fontSize: 12 }}>
+      <span style={{ color: "var(--muted)", fontWeight: 500 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Click to copy full address"
+          style={{
+            background: copied ? "var(--green-pale)" : "var(--card-muted)",
+            border: `1px solid ${copied ? "var(--green-light)" : "var(--line)"}`,
+            borderRadius: 6,
+            padding: "2px 8px",
+            fontFamily: "'Geist Mono', monospace",
+            fontSize: 11.5,
+            color: copied ? "var(--green)" : "var(--ink)",
+            cursor: "pointer",
+            transition: "all 140ms ease",
+          }}
+        >
+          {copied ? "Copied ✓" : shortAddress(address)}
+        </button>
+        {explorer && (
+          <a
+            href={explorer(kind, address)}
+            target="_blank"
+            rel="noreferrer"
+            title="Inspect on Solana Explorer"
+            style={{ color: "var(--muted)", display: "inline-flex", alignItems: "center", transition: "color 140ms" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--green)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--muted)"; }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none">
+              <path d="M7 17L17 7M17 7H7M17 7v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MeteoraTradeCard({ launch, explorer, onSelectTab }) {
+  const wallet = useWallet();
+  const [saved] = React.useState(() => savedDbcTrade(launch.dbc.pool));
+  const [direction, setDirection] = React.useState(saved.direction);
+  const [amount, setAmount] = React.useState(saved.amount);
+  const [slippageBps, setSlippageBps] = React.useState(saved.slippageBps);
+  const [reviewRequested, setReviewRequested] = React.useState(saved.reviewRequested);
+  const [reviewVersion, setReviewVersion] = React.useState(0);
+  const [quote, setQuote] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [signature, setSignature] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
+  const [pendingProofs, setPendingProofs] = React.useState(() => pendingDbcProofs(launch.dbc.pool));
+  const [proofError, setProofError] = React.useState(null);
+  const canTrade = !launch.dbc.liveStale && !launch.dbc.liveError && launch.dbc.liveStatus?.migrationProgress === 0;
+  const isMigrated = launch.dbc.liveStatus?.dammV2?.verified === true;
+  const dammPool = launch.dbc.liveStatus?.dammV2?.pool;
+
+  React.useEffect(() => {
+    try {
+      sessionStorage.setItem(`toluva:dbc-trade:${launch.dbc.pool}`, JSON.stringify({ direction, amount, slippageBps, reviewRequested }));
+    } catch { /* Storage may be disabled; the trade still works for this page visit. */ }
+  }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested]);
+
+  React.useEffect(() => {
+    try { localStorage.setItem(`toluva:dbc-proof:${launch.dbc.pool}`, JSON.stringify(pendingProofs)); }
+    catch { /* The trade remains confirmed even when browser storage is disabled. */ }
+    if (!pendingProofs.length) return undefined;
+    let active = true;
+    let processing = false;
+    async function verifyPending() {
+      if (processing || !active) return;
+      processing = true;
+      for (const proof of pendingProofs) {
+        try {
+          await postJson("/api/meteora/trades/verify", { pool: launch.dbc.pool, signature: proof });
+          if (!active) break;
+          setPendingProofs((current) => current.filter((item) => item !== proof));
+          setProofError(null);
+          await refreshRegistry({ force: true });
+        } catch (cause) {
+          if (active) setProofError(friendlyError(cause, "data"));
+        }
+      }
+      processing = false;
+    }
+    verifyPending();
+    const timer = window.setInterval(verifyPending, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [launch.dbc.pool, pendingProofs]);
+
+  React.useEffect(() => {
+    setQuote(null);
+    if (!reviewRequested || !canTrade || !amount) {
+      setBusy(false);
+      return undefined;
+    }
+    let active = true;
+    setBusy(true); setError(null);
+    const params = new URLSearchParams({ pool: launch.dbc.pool, direction, amount, slippageBps: String(slippageBps) });
+    getJson(`/api/meteora/swap/quote?${params}`)
+      .then((result) => { if (active) setQuote(result.quote); })
+      .catch((cause) => { if (active) setError(friendlyError(cause, "quote")); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [launch.dbc.pool, direction, amount, slippageBps, reviewRequested, reviewVersion, canTrade]);
+
+  function updateDirection(value) { setDirection(value); setReviewRequested(false); }
+  function updateAmount(value) { setAmount(value); setReviewRequested(false); }
+  function updateSlippage(value) { setSlippageBps(value); setReviewRequested(false); }
+  function review() { setPendingSignature(null); setReviewRequested(true); setReviewVersion((version) => version + 1); }
+
+  async function trade() {
+    if (!quote) return;
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { tradeMeteoraToken } = await import("../../../lib/meteoraDbc");
+      const result = await tradeMeteoraToken({ wallet, reviewedQuote: quote });
+      setSignature(result.signature);
+      setPendingProofs((current) => current.includes(result.signature) ? current : [...current, result.signature]);
+      setQuote(null);
+      setReviewRequested(false);
+      setAmount("");
+      await refreshRegistry({ force: true });
+    } catch (cause) {
+      setError(friendlyError(cause, "trade"));
+      setPendingSignature(cause?.signature || null);
+      if (cause?.code === "BLOCKHASH_EXPIRED" || cause?.code === "CONFIRMATION_UNKNOWN" || /blockhash not found/i.test(cause?.message || "")) {
+        setQuote(null);
+        setReviewRequested(false);
+      }
+    } finally { setBusy(false); }
+  }
+
+  // If curve is finished and migrated to DAMM v2, display sleek graduation action card
+  if (!canTrade && isMigrated && !launch.dbc.liveStale && !launch.dbc.liveError) {
+    return (
+      <div className="card" style={{ padding: 24, display: "grid", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 36, height: 36, borderRadius: "50%",
+            background: "var(--green-pale)", color: "var(--green)", fontSize: 18,
+            border: "1.5px solid #fbcfe8"
+          }}>✓</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Curve Graduated</h3>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Meteora DAMM v2 active</div>
+          </div>
+        </div>
+
+        <div style={{ background: "var(--card-muted)", borderRadius: 14, padding: 14, fontSize: 12.5, lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>DBC Trading is Finalized</div>
+          <div style={{ color: "var(--ink-dim)" }}>
+            The bonding curve reached its target. The configured share of creator liquidity is permanently locked, and trading continues on the migrated DAMM v2 pool.
+          </div>
+        </div>
+
+        {dammPool && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#fff", border: "1px solid var(--line)", borderRadius: 12, fontSize: 12 }}>
+            <span style={{ color: "var(--muted)" }}>DAMM v2 Pool</span>
+            <a href={`https://explorer.solana.com/address/${dammPool}?cluster=${encodeURIComponent(launch.dbc.cluster || "devnet")}`} target="_blank" rel="noreferrer" style={{ fontFamily: "'Geist Mono', monospace", color: "var(--green)", fontWeight: 600 }}>
+              {shortAddress(dammPool)} ↗
+            </a>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+          {onSelectTab && (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => onSelectTab("liquidity")}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              Manage DLMM Liquidity →
+            </button>
+          )}
+          {dammPool && (
+            <a
+              href={`https://explorer.solana.com/address/${dammPool}?cluster=${encodeURIComponent(launch.dbc.cluster || "devnet")}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn ghost"
+              style={{ width: "100%", textAlign: "center", justifyContent: "center" }}
+            >
+              Inspect DAMM v2 on Solana ↗
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Trade on Meteora DBC</h3>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Devnet · exact input · wallet-signed</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, background: "var(--card-muted)", padding: 4, borderRadius: 12 }}>
+        <button
+          type="button"
+          className={`btn ${direction === "buy" ? "primary" : "ghost"}`}
+          style={{ justifyContent: "center", padding: "8px 12px", borderRadius: 10 }}
+          onClick={() => updateDirection("buy")}
+        >
+          Buy ${launch.dbc.symbol}
+        </button>
+        <button
+          type="button"
+          className={`btn ${direction === "sell" ? "primary" : "ghost"}`}
+          style={{ justifyContent: "center", padding: "8px 12px", borderRadius: 10 }}
+          onClick={() => updateDirection("sell")}
+        >
+          Sell ${launch.dbc.symbol}
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 120px", gap: 10 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Amount ({direction === "buy" ? "SOL" : launch.dbc.symbol})
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => updateAmount(event.target.value)}
+              placeholder={direction === "buy" ? "0.01" : "100"}
+              style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>Slippage
+            <select
+              value={slippageBps}
+              onChange={(event) => updateSlippage(Number(event.target.value))}
+              style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px" }}
+            >
+              <option value={50}>0.5%</option>
+              <option value={100}>1%</option>
+              <option value={200}>2%</option>
+              <option value={500}>5%</option>
+            </select>
+          </label>
+        </div>
+
+        {/* Quick Amount Chips */}
+        {canTrade && (
+          <div className="quick-chips-row">
+            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>Preset:</span>
+            {(direction === "buy" ? ["0.01", "0.05", "0.1", "0.5"] : ["100", "500", "1000", "5000"]).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={`quick-chip${amount === preset ? " active" : ""}`}
+                onClick={() => updateAmount(preset)}
+              >
+                {preset} {direction === "buy" ? "SOL" : ""}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!canTrade && (
+        <div style={{ fontSize: 12, color: "var(--muted)", background: "var(--card-muted)", padding: "10px 14px", borderRadius: 10 }}>
+          {launch.dbc.liveStale || launch.dbc.liveError
+            ? "Live pool status is unavailable. Trading will resume after a fresh chain check."
+            : launch.dbc.liveStatus
+              ? "The DBC curve has finished; trading here is closed."
+              : "Waiting for live pool state before trading."}
+        </div>
+      )}
+
+      {quote && (
+        <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 12, lineHeight: 1.7 }}>
+          <div>Estimated received: <strong>{quote.outputAmountDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+          <div>Minimum received: <strong>{quote.minimumAmountOutDisplay} {direction === "buy" ? launch.dbc.symbol : "SOL"}</strong></div>
+          <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>The transaction will fail if the minimum cannot be met. Network costs apply.</div>
+        </div>
+      )}
+
+      {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {pendingSignature && <a href={`https://explorer.solana.com/tx/${pendingSignature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
+      {wallet.error && <div style={{ color: "#9f1239", fontSize: 12 }}>{wallet.error}</div>}
+      {signature && <a href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed trade {shortAddress(signature)} ↗</a>}
+      {pendingProofs.length > 0 && <div style={{ color: "var(--ink-dim)", fontSize: 12 }}>Checking {pendingProofs.length} confirmed trade{pendingProofs.length === 1 ? "" : "s"} for finalized activity. {proofError || ""}</div>}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <button
+          type="button"
+          className="btn ghost"
+          disabled={busy || !canTrade || !amount}
+          onClick={review}
+          style={{ flex: 1, justifyContent: "center" }}
+        >
+          {busy && !quote ? "Quoting…" : "Review quote"}
+        </button>
+        {quote && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !wallet.connected || !canTrade}
+            onClick={trade}
+            style={{ flex: 1, justifyContent: "center" }}
+          >
+            {busy ? "Signing…" : "Sign trade"}
+          </button>
+        )}
+        {!wallet.connected && (
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={wallet.connect}
+            style={{ flex: 1, justifyContent: "center" }}
+          >
+            Connect wallet
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DbcActivityCard({ launch, explorer }) {
+  const activity = launch.dbc.activity;
+  return (
+    <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Verified DBC activity</h3>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Finalized swaps submitted to Toluva and checked against this pool on chain.</div>
+      </div>
+      {activity?.error ? <div style={{ color: "#9f1239", fontSize: 12 }}>{friendlyError(activity.error, "data")}</div> : <>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <StatTile label="Tracked buyers" value={`${activity?.trackedBuyers ?? 0}${activity?.complete === false ? "+" : ""}`} />
+          <StatTile label="Verified buys" value={`${activity?.trackedBuys ?? 0}${activity?.complete === false ? "+" : ""}`} />
+          <StatTile label="Verified sells" value={`${activity?.trackedSells ?? 0}${activity?.complete === false ? "+" : ""}`} />
+        </div>
+        {(activity?.recent || []).length ? <div style={{ display: "grid", gap: 8 }}>
+          {activity.recent.map((trade) => <div key={trade.signature} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 12, borderTop: "1px solid var(--line)", paddingTop: 9 }}>
+            <span><strong style={{ textTransform: "capitalize" }}>{trade.direction}</strong> · {shortAddress(trade.wallet)} · {(Number(trade.quoteLamports) / LAMPORTS_PER_SOL).toLocaleString(undefined, { maximumFractionDigits: 6 })} SOL</span>
+            <a href={explorer("tx", trade.signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>{shortAddress(trade.signature)} ↗</a>
+          </div>)}
+        </div> : <div style={{ color: "var(--muted)", fontSize: 12 }}>No finalized swaps have been tracked yet.</div>}
+      </>}
+    </div>
+  );
+}
+
+function ConvictionProofCard({ launch, explorer }) {
+  const wallet = useWallet();
+  const [proof, setProof] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const result = await getJson(`/api/meteora/conviction-proof?pool=${encodeURIComponent(launch.dbc.pool)}`);
+        if (active) { setProof(result.proof); setError(null); }
+      } catch (cause) { if (active) setError(friendlyError(cause, "data")); }
+    }
+    refresh();
+    const timer = window.setInterval(refresh, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [launch.dbc.pool]);
+
+  const checkpoint = (observation, label) => <div key={label} style={{ borderTop: "1px solid var(--line)", paddingTop: 7, fontSize: 11, color: "var(--muted)" }}>
+    <strong style={{ color: "var(--ink)" }}>{label}</strong>: {observation
+      ? <>{(Number(observation.amount) / (10 ** proof.policy.tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 3 })} {launch.dbc.symbol} at finalized slot {observation.slot} · {new Date(observation.blockTime * 1000).toLocaleString()}{observation.accounts?.length > 0 && <> · <a href={explorer("address", observation.accounts[0])} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>token account ↗</a></>}</>
+      : "pending"}
+  </div>;
+
+  const requiredBuySol = proof ? Number(proof.policy.minimumVerifiedBuyLamports) / LAMPORTS_PER_SOL : null;
+  const requiredTokens = proof ? Number(proof.policy.minimumTokenBaseUnitsAtEachCheckpoint) / (10 ** proof.policy.tokenDecimals) : null;
+  const checkHours = proof ? proof.policy.minimumSecondsBetweenCheckpoints / 3600 : null;
+  const yourRecord = proof?.participants?.find((person) => person.wallet === wallet.address);
+  const yourStatus = yourRecord?.eligible
+    ? "Your wallet meets the published rules. This trial has no reward to claim."
+    : yourRecord?.status === "awaiting_migration"
+      ? "Your buy qualifies. Balance checks begin after this pool moves to DAMM v2."
+      : yourRecord?.status === "awaiting_entry"
+        ? "Your buy qualifies. The first balance check is pending."
+        : yourRecord?.status === "awaiting_followup"
+          ? "Your first balance check passed. The second check is pending."
+          : yourRecord
+            ? "Your wallet did not meet both balance checks under these rules."
+            : `No qualifying buy is recorded for your wallet in this pool. A verified buy of at least ${requiredBuySol} SOL is needed; smaller buys still appear in the Activity tab.`;
+
+  return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Conviction after graduation</h3>
+        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Verified buy and two saved balance checks</div>
+      </div>
+      <span className="status-pill pending">No reward funded</span>
+    </div>
+    <div style={{ fontSize: 12, color: "var(--ink-dim)", lineHeight: 1.6 }}>
+      {proof ? `Buy at least ${requiredBuySol} SOL in this pool. Once the token reaches DAMM v2, Toluva checks whether your wallet has at least ${requiredTokens} ${launch.dbc.symbol} twice, ${checkHours} hours or more apart.` : "Checking the published participation rules."} These are two balance snapshots, not proof that tokens stayed in the wallet between them. This trial has no payout.
+    </div>
+    {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+    {proof ? <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+        <StatTile label="1 · Buy" value={`${requiredBuySol} SOL`} sub="Minimum verified buy" />
+        <StatTile label="2 · Graduate" value={proof.migrated ? "Complete" : "Waiting"} sub="Move to DAMM v2" />
+        <StatTile label="3 · Balance checks" value={`${checkHours} hours apart`} sub={`At least ${requiredTokens} ${launch.dbc.symbol} each time`} />
+      </div>
+      {wallet.connected && <div style={{ padding: 14, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.6 }}>
+        <strong>Your progress · {wallet.short}</strong><div>{yourStatus}</div>
+      </div>}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <StatTile label="Wallets meeting the rules" value={`${proof.walletsEligible}${proof.complete ? "" : "+"}`} />
+        <StatTile label="Wallets with qualifying buys" value={`${proof.qualifyingWalletsTracked}${proof.complete ? "" : "+"}`} />
+      </div>
+      {(proof.participants || []).map((person, index) => <div key={person.wallet} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12, display: "grid", gap: 7 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div><strong>#{index + 1} · {shortAddress(person.wallet)}</strong>{person.wallet === launch.creator && " · Creator wallet"} · {person.score}/{proof.policy.pointsRequiredForEligibility} checks · {person.status === "eligible" ? "Meets the rules" : person.status === "awaiting_migration" ? "Waiting for graduation" : person.status === "awaiting_entry" ? "First balance check pending" : person.status === "awaiting_followup" ? "Second balance check pending" : "Did not meet the rules"}</div>
+          <a href={explorer("tx", person.buySignature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>Verified buy {shortAddress(person.buySignature)} ↗</a>
+        </div>
+        {checkpoint(person.checkpoints.entry, "First balance check")}
+        {checkpoint(person.checkpoints.followup, "Second balance check")}
+        {person.nextCheckpointAfter && <div style={{ color: "var(--muted)", fontSize: 11 }}>Second check can happen after {new Date(person.nextCheckpointAfter).toLocaleString()}.</div>}
+      </div>)}
+      {!proof.participants?.length && <div style={{ color: "var(--muted)", fontSize: 12 }}>No tracked wallet has submitted a qualifying buy.</div>}
+      {proof.chainStale && <div style={{ color: "#9f1239", fontSize: 11 }}>Live chain updates are delayed. Saved checkpoint evidence remains visible; new observations will resume when Solana responds.</div>}
+      {proof.observationErrors?.length > 0 && <div style={{ color: "#9f1239", fontSize: 11 }}>Balance observation delayed for {proof.observationErrors.length} wallet(s); the server will retry.</div>}
+      <div style={{ color: "var(--muted)", fontSize: 11 }}>Rules: {proof.policy.id} · checked {new Date(proof.checkedAt).toLocaleString()} · verified trades submitted to Toluva only{proof.complete ? "" : " · coverage limit reached"}. Balance readings are saved when observed; a missed check cannot be backdated.</div>
+    </> : !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking proof…</div>}
+  </div>;
+}
+
+function DlmmLiquidityCard({ launch, explorer }) {
+  function displayUnits(raw, decimals) {
+    try {
+      const units = BigInt(raw || "0");
+      const divisor = 10n ** BigInt(decimals);
+      const fractional = String(units % divisor).padStart(decimals, "0").replace(/0+$/, "");
+      return `${units / divisor}${fractional ? `.${fractional}` : ""}`;
+    } catch { return "—"; }
+  }
+  const wallet = useWallet();
+  const [plan, setPlan] = React.useState(null);
+  const [status, setStatus] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [stage, setStage] = React.useState(null);
+  const [receipt, setReceipt] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
+  const [baseAmount, setBaseAmount] = React.useState("");
+  const [quoteAmount, setQuoteAmount] = React.useState("");
+  const [review, setReview] = React.useState(null);
+  const [withdrawalReview, setWithdrawalReview] = React.useState(null);
+  const preparedPosition = React.useRef(null);
+  const preparedWithdrawal = React.useRef(null);
+  const linkedPool = launch.dbc.dlmm?.pool;
+  const isCreator = wallet.address === launch.creator;
+
+  const refresh = React.useCallback(async () => {
+    try {
+      if (linkedPool) {
+        const result = await getJson(`/api/meteora/dlmm/status?dbcPool=${encodeURIComponent(launch.dbc.pool)}${wallet.address ? `&wallet=${encodeURIComponent(wallet.address)}` : ""}`);
+        setStatus(result.status);
+      } else {
+        const result = await getJson(`/api/meteora/dlmm/plan?dbcPool=${encodeURIComponent(launch.dbc.pool)}`);
+        setPlan(result.plan);
+      }
+      setError(null);
+    } catch (cause) { setError(friendlyError(cause, "data")); }
+  }, [launch.dbc.pool, linkedPool, wallet.address]);
+
+  React.useEffect(() => {
+    let active = true;
+    refresh();
+    const timer = window.setInterval(() => { if (active && !busy) refresh(); }, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [refresh, busy]);
+
+  async function createOrLink() {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    try {
+      const { createAndLinkDlmmPool, linkExistingDlmmPool } = await import("../../../lib/meteoraDlmm");
+      const result = plan.exists
+        ? await linkExistingDlmmPool({ wallet, dbcPool: launch.dbc.pool, dlmmPool: plan.address, onStage: setStage })
+        : await createAndLinkDlmmPool({ wallet, dbcPool: launch.dbc.pool, onStage: setStage });
+      setReceipt(result.signature ? { signature: result.signature, label: "DLMM pool created" } : null);
+      await refreshRegistry({ force: true });
+      await refresh();
+    } catch (cause) { await refresh(); setError(friendlyError(cause, "launch")); setPendingSignature(cause?.signature || null); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function reviewPosition() {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    setReview(null); preparedPosition.current = null;
+    try {
+      const { prepareDlmmLiquidity } = await import("../../../lib/meteoraDlmm");
+      const prepared = await prepareDlmmLiquidity({
+        wallet, dbcPool: launch.dbc.pool, dlmmPool: linkedPool,
+        baseAmount: baseAmount.trim(), quoteAmount: quoteAmount.trim(), onStage: setStage,
+      });
+      preparedPosition.current = prepared;
+      setReview({ baseAmount: prepared.baseAmount, quoteAmount: prepared.quoteAmount,
+        minBinId: prepared.minBinId, maxBinId: prepared.maxBinId });
+    } catch (cause) { setError(friendlyError(cause, "liquidity")); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function signPosition() {
+    if (!preparedPosition.current) return;
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { signPreparedDlmmLiquidity } = await import("../../../lib/meteoraDlmm");
+      const result = await signPreparedDlmmLiquidity({ wallet, prepared: preparedPosition.current, onStage: setStage });
+      setReceipt({ signature: result.signature, label: "Liquidity position confirmed" });
+      setBaseAmount(""); setQuoteAmount("");
+      setReview(null); preparedPosition.current = null;
+      await refresh();
+    } catch (cause) {
+      setError(friendlyError(cause, "liquidity")); setPendingSignature(cause?.signature || null);
+      if (cause?.signature) { setReview(null); preparedPosition.current = null; }
+    }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function reviewWithdrawal(position) {
+    setBusy(true); setError(null); setReceipt(null); setPendingSignature(null);
+    setWithdrawalReview(null); preparedWithdrawal.current = null;
+    try {
+      const { prepareDlmmWithdrawal } = await import("../../../lib/meteoraDlmm");
+      const prepared = await prepareDlmmWithdrawal({
+        wallet, dbcPool: launch.dbc.pool, dlmmPool: linkedPool, position: position.address,
+        onStage: setStage,
+      });
+      preparedWithdrawal.current = prepared;
+      setWithdrawalReview({ ...position, steps: prepared.transactions.length });
+    } catch (cause) { setError(friendlyError(cause, "liquidity")); }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  async function signWithdrawal() {
+    if (!preparedWithdrawal.current) return;
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { signPreparedDlmmWithdrawal } = await import("../../../lib/meteoraDlmm");
+      const result = await signPreparedDlmmWithdrawal({ wallet, prepared: preparedWithdrawal.current, onStage: setStage });
+      setReceipt({ signature: result.signatures.at(-1), label: "Liquidity withdrawn" });
+      setWithdrawalReview(null); preparedWithdrawal.current = null;
+      await refresh();
+    } catch (cause) {
+      await refresh();
+      setError(friendlyError(cause, "liquidity"));
+      setPendingSignature(cause?.signature || null);
+      if (cause?.completedSignatures?.length) {
+        setReceipt({ signature: cause.completedSignatures.at(-1), label: "Withdrawal step confirmed; refresh before continuing" });
+      }
+      setWithdrawalReview(null); preparedWithdrawal.current = null;
+    }
+    finally { setBusy(false); setStage(null); }
+  }
+
+  const referenceSolPerToken = plan?.referencePriceRaw
+    ? (Number(plan.referencePriceRaw) / 1000).toFixed(12).replace(/0+$/, "").replace(/\.$/, "") : null;
+  return <div className="card" style={{ padding: 24, marginTop: 18, display: "grid", gap: 14 }}>
+    <div>
+      <h3 style={{ margin: 0 }}>Conviction liquidity · DLMM</h3>
+      <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+        A separate, optional Meteora market after DBC graduates to DAMM v2
+      </div>
+    </div>
+    <div style={{ color: "var(--ink-dim)", fontSize: 12, lineHeight: 1.6 }}>
+      The creator can open a DLMM pool at the current DAMM v2 reference price. Anyone can then add their own {launch.dbc.symbol} and SOL to a position. Liquidity is not moved from DAMM v2 automatically. A position may earn trading fees, but returns are not guaranteed; this is not a funded Toluva reward.
+    </div>
+    {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+    {pendingSignature && <a href={explorer("tx", pendingSignature)} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
+    {stage && <div style={{ color: "var(--green)", fontSize: 12 }}>{stage}</div>}
+    {receipt && <a href={explorer("tx", receipt.signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>{receipt.label} · {shortAddress(receipt.signature)} ↗</a>}
+    {!linkedPool && plan && <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <StatTile label="Reference price" value={referenceSolPerToken ? `${referenceSolPerToken} SOL` : "—"} sub={`Per ${launch.dbc.symbol}; changes with the DAMM v2 market`} />
+        <StatTile label="DLMM bin step" value={`${plan.binStep} bps`} sub="Meteora devnet liquidity preset" />
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+        {plan.exists ? "The expected DLMM pool is already on chain and can be linked by this launch's creator." : "Creating the pool pays network costs and opens an empty market. The creator or participants must add liquidity separately."}
+      </div>
+      {isCreator ? <button type="button" className="btn primary" disabled={busy} onClick={createOrLink}>{busy ? "Working…" : plan.exists ? "Link this DLMM pool" : "Create and link DLMM pool"}</button>
+        : <div style={{ fontSize: 12, color: "var(--muted)" }}>Waiting for the launch creator to link this pool.</div>}
+    </>}
+    {linkedPool && <>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", fontSize: 12 }}>
+        <strong>Linked DLMM pool</strong><a href={explorer("address", linkedPool)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(linkedPool)} ↗</a>
+      </div>
+      {status?.linked && <>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <StatTile label="Bin step" value={`${status.binStep} bps`} />
+          <StatTile label="Your positions" value={wallet.connected ? String(status.positions.length) : "Connect wallet"} />
+        </div>
+        <div style={{ padding: 12, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.6 }}>
+          <strong>Liquidity in this pool now</strong>
+          <div>{displayUnits(status.tokenXReserve, 6)} {launch.dbc.symbol} + {displayUnits(status.tokenYReserve, 9)} SOL</div>
+          <div style={{ color: "var(--muted)" }}>These amounts change when people trade or withdraw.</div>
+        </div>
+        {wallet.connected && status.positions.map((position) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 9, fontSize: 12, display: "grid", gap: 5 }}>
+          <a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position {shortAddress(position.address)} ↗</a>
+          <div style={{ color: "var(--muted)" }}>Bin range {position.lowerBinId} to {position.upperBinId}</div>
+          <div>Liquidity now: {displayUnits(position.tokenXAmount, 6)} {launch.dbc.symbol} + {displayUnits(position.tokenYAmount, 9)} SOL</div>
+          <div style={{ color: "var(--muted)" }}>Unclaimed fees: {displayUnits(position.feeXAmount, 6)} {launch.dbc.symbol} + {displayUnits(position.feeYAmount, 9)} SOL</div>
+          <button type="button" className="btn ghost" disabled={busy} onClick={() => reviewWithdrawal(position)} style={{ justifySelf: "start" }}>Review full withdrawal</button>
+        </div>)}
+        {withdrawalReview && <div style={{ padding: 14, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.7 }}>
+          <strong>Review full withdrawal</strong>
+          <div>Position {shortAddress(withdrawalReview.address)} · {withdrawalReview.steps} wallet approval{withdrawalReview.steps === 1 ? "" : "s"}</div>
+          <div>All liquidity will be removed, accrued fees claimed, and the position closed. You will receive the token and SOL amounts available when the transaction executes. Network costs apply.</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn primary" disabled={busy} onClick={signWithdrawal}>{busy ? "Working…" : "Sign full withdrawal"}</button>
+            <button type="button" className="btn ghost" disabled={busy} onClick={() => { setWithdrawalReview(null); preparedWithdrawal.current = null; }}>Cancel</button>
+          </div>
+        </div>}
+        {!wallet.connected ? <button type="button" className="btn ghost" onClick={wallet.connect}>Connect wallet to add liquidity</button> : <>
+          <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>Choose the amounts for your new position. Toluva uses a 21-bin spot range around the current price. Both deposits and network costs need wallet approval.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+            <label style={{ display: "grid", gap: 6, fontSize: 12 }}>Amount ({launch.dbc.symbol})<input type="text" inputMode="decimal" value={baseAmount} onChange={(event) => { setBaseAmount(event.target.value); setReview(null); preparedPosition.current = null; }} placeholder="Token amount" style={{ border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /></label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12 }}>Amount (SOL)<input type="text" inputMode="decimal" value={quoteAmount} onChange={(event) => { setQuoteAmount(event.target.value); setReview(null); preparedPosition.current = null; }} placeholder="SOL amount" style={{ border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /></label>
+          </div>
+          {review ? <div style={{ padding: 14, borderRadius: 12, background: "var(--card-muted)", fontSize: 12, lineHeight: 1.7 }}>
+            <strong>Review your deposit</strong><div>{review.baseAmount} {launch.dbc.symbol} + {review.quoteAmount} SOL</div>
+            <div>DLMM bin range: {review.minBinId} to {review.maxBinId} · 1% deposit slippage setting</div>
+            <div>Creating a position costs network rent and fees. You can review a full withdrawal from this page; the position's value can change with price.</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button type="button" className="btn primary" disabled={busy} onClick={signPosition}>{busy ? "Working…" : "Sign deposit"}</button>
+              <button type="button" className="btn ghost" disabled={busy} onClick={() => { setReview(null); preparedPosition.current = null; }}>Change amounts</button>
+            </div>
+          </div> : <button type="button" className="btn primary" disabled={busy || !baseAmount.trim() || !quoteAmount.trim()} onClick={reviewPosition}>{busy ? "Working…" : "Review liquidity deposit"}</button>}
+        </>}
+      </>}
+    </>}
+    {!plan && !linkedPool && !error && <div style={{ color: "var(--muted)", fontSize: 12 }}>Checking DLMM pool options…</div>}
+  </div>;
+}
+
+function MeteoraMigrationCard({ launch, explorer }) {
+  const wallet = useWallet();
+  const chain = launch.dbc.liveStatus;
+  const damm = chain?.dammV2;
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [signature, setSignature] = React.useState(null);
+  const [pendingSignature, setPendingSignature] = React.useState(null);
+  const fresh = !launch.dbc.liveStale && !launch.dbc.liveError;
+  const ready = fresh && chain?.migrationReady;
+  const stageText = {
+    bonding: "DBC trading",
+    "curve-complete": "Curve complete · ready to migrate",
+    "post-bonding": "Preparing migration",
+    "locked-vesting": "Vesting prepared · ready to migrate",
+    "created-pool": damm?.verified ? "DAMM v2 pool verified" : "Checking DAMM v2 pool",
+    unknown: "Unknown chain stage",
+  }[chain?.migrationStage] || "Waiting for chain status";
+
+  async function migrate() {
+    setBusy(true); setError(null); setPendingSignature(null);
+    try {
+      const { migrateMeteoraPool } = await import("../../../lib/meteoraDbc");
+      const result = await migrateMeteoraPool({ wallet, status: chain });
+      setSignature(result.signature);
+      await refreshRegistry({ force: true });
+    } catch (cause) {
+      setError(friendlyError(cause, "migration"));
+      setPendingSignature(cause?.signature || null);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card" style={{ padding: 24, display: "grid", alignContent: "start", gap: 14 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>DBC → DAMM v2</h3>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>The graduation path, read from Solana devnet</div>
+      </div>
+      <div style={{ background: "var(--card-muted)", borderRadius: 12, padding: 14, fontSize: 13 }}>
+        <strong>{stageText}</strong>
+        {chain && <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 12 }}>{Number(chain.quoteReserveLamports) / LAMPORTS_PER_SOL} SOL in DBC quote reserve · {chain.progressPercent.toFixed(2)}% of target</div>}
+      </div>
+      {damm && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
+        <span style={{ color: "var(--muted)" }}>{damm.verified ? "DAMM v2 pool" : "Expected DAMM v2 pool"}</span>
+        <a href={explorer("address", damm.pool)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontFamily: "'Geist Mono', monospace" }}>{shortAddress(damm.pool)} ↗</a>
+      </div>}
+      {damm?.verified && <>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+          <StatTile label="Pool state" value={damm.poolStatus === 0 ? "Enabled" : "Disabled"} />
+          <StatTile label="Positions" value={damm.positionError ? "Unavailable" : String(damm.positions.length)} />
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>DAMM v2 initial base fee: {damm.initialBaseFeeBps / 100}% · pool liquidity: {damm.liquidity} units · permanently locked: {damm.permanentLockLiquidity} units</div>
+        {damm.positions.map((position, index) => <div key={position.address} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12, lineHeight: 1.7 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><strong>Position {index + 1}</strong><a href={explorer("address", position.address)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.address)} ↗</a></div>
+          {position.nftHolder && <div style={{ color: "var(--muted)" }}>NFT holder: <a href={explorer("address", position.nftHolder)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>{shortAddress(position.nftHolder)} ↗</a></div>}
+          {position.ownerError && <div style={{ color: "#9f1239" }}>NFT holder is temporarily unavailable. {friendlyError(position.ownerError, "data")}</div>}
+          <div style={{ color: "var(--muted)" }}>Unlocked liquidity: {position.unlockedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Vested liquidity: {position.vestedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Permanently locked liquidity: {position.permanentLockedLiquidity} units</div>
+          <div style={{ color: "var(--muted)" }}>Pending fees: {position.pendingBaseFee} {launch.dbc.symbol} · {position.pendingQuoteFee} SOL</div>
+          <a href={explorer("address", position.nftMint)} target="_blank" rel="noreferrer" style={{ color: "var(--green)" }}>Position NFT {shortAddress(position.nftMint)} ↗</a>
+        </div>)}
+        {damm.positionError && <div style={{ color: "#9f1239", fontSize: 12 }}>Positions are temporarily unavailable. {friendlyError(damm.positionError, "data")}</div>}
+      </>}
+      {fresh && chain?.migrationStage === "bonding" && <div style={{ fontSize: 12, color: "var(--muted)" }}>Trading continues on DBC until the on-chain graduation target is reached.</div>}
+      {fresh && chain?.lockedVesting && chain?.migrationStage !== "created-pool" && <div style={{ fontSize: 12, color: "var(--muted)" }}>This pool requires a vesting locker before migration. Manual migration here supports launches without locked vesting.</div>}
+      {ready && <div style={{ fontSize: 12, color: "var(--muted)" }}>Meteora may migrate this pool automatically. If it remains pending, a connected wallet can submit the migration and pay the network costs.</div>}
+      {error && <div style={{ color: "#9f1239", fontSize: 12 }}>{error}</div>}
+      {pendingSignature && <a href={explorer("tx", pendingSignature)} target="_blank" rel="noreferrer" style={{ color: "#9f1239", fontSize: 12 }}>Check transaction status ↗</a>}
+      {signature && <a href={explorer("tx", signature)} target="_blank" rel="noreferrer" style={{ color: "var(--green)", fontSize: 12 }}>Confirmed migration {shortAddress(signature)} ↗</a>}
+      {ready && <button type="button" className="btn primary" disabled={busy} onClick={wallet.connected ? migrate : wallet.connect}>{busy ? "Signing migration…" : wallet.connected ? "Migrate to DAMM v2" : "Connect wallet to migrate"}</button>}
+      {!fresh && <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Refresh chain status</button>}
+    </div>
+  );
+}
+
+function LaunchOperatorGuide({ launch, onSelectTab }) {
+  const [report, setReport] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+  const [refresh, setRefresh] = React.useState(0);
+
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getJson(`/api/operator/launches/${encodeURIComponent(launch.sym)}/report`)
+      .then((data) => { if (active) { setReport(data); setError(""); } })
+      .catch(() => { if (active) setError("The latest launch guidance is unavailable. Try again in a moment."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [launch.sym, refresh]);
+
+  return (
+    <section className="card operator-guide" aria-label="Launch Operator guidance">
+      <div className="operator-guide-head">
+        <div>
+          <div className="operator-eyebrow">Launch Operator</div>
+          <h3>What comes next?</h3>
+        </div>
+        <button type="button" className="btn ghost" onClick={() => setRefresh((value) => value + 1)} disabled={loading}>{loading ? "Checking…" : "Refresh guidance"}</button>
+      </div>
+      {error && <div className="operator-notice error" role="alert">{error}</div>}
+      {report && (
+        <div className="operator-guide-content">
+          <div className="operator-guide-step">
+            <span className="operator-step-label">Next step</span>
+            <strong>{report.next.title}</strong>
+            <p>{report.next.detail}</p>
+            {report.chain.stale && <p>Chain information may be outdated. Refresh it before taking action.</p>}
+            <button type="button" className="btn primary" onClick={() => onSelectTab(report.next.anchor || "overview")}>Review {report.next.anchor === "liquidity" ? "liquidity" : "launch"} →</button>
+          </div>
+          <div className="operator-guide-facts">
+            <span><strong>{Number.isFinite(report.chain.progressPercent) ? `${report.chain.progressPercent.toFixed(2)}%` : "—"}</strong> toward graduation</span>
+            <span><strong>{report.activity.available ? report.activity.trackedBuys + report.activity.trackedSells : "—"}</strong> verified submitted trades</span>
+            <span><strong>{report.liquidity.linked ? "Linked" : "Not linked"}</strong> DLMM market</span>
+          </div>
+        </div>
+      )}
+      <small>Guidance is based on registered launches, verified activity, and current pool reads. Wallet actions always require your review and signature.</small>
+    </section>
+  );
+}
+
+function MeteoraTokenDetailPage({ launch }) {
+  const dbc = launch.dbc;
+  const chain = dbc.liveStatus;
+  const terms = dbc.onchainConfig || {};
+  const progress = chain?.progressPercent;
+  const targetSol = terms.migrationQuoteThreshold ? Number(terms.migrationQuoteThreshold) / LAMPORTS_PER_SOL : null;
+  const raisedSol = chain?.quoteReserveLamports ? Number(chain.quoteReserveLamports) / LAMPORTS_PER_SOL : 0;
+  const isMigrated = chain?.dammV2?.verified === true;
+  const status = dbc.liveStale || dbc.liveError
+    ? "Waiting for fresh chain status"
+    : chain
+      ? isMigrated ? "Migrated to DAMM v2" : chain.migrationStage === "bonding" ? "Trading on DBC" : "Curve complete · migration pending"
+      : "Waiting for chain status";
+  const explorer = (kind, value) => `https://explorer.solana.com/${kind}/${value}?cluster=${encodeURIComponent(dbc.cluster || "devnet")}`;
+
+  const getTabFromHash = React.useCallback(() => {
+    if (typeof window === "undefined") return "overview";
+    const hash = window.location.hash.replace("#", "").toLowerCase();
+    return ["overview", "liquidity", "conviction", "activity"].includes(hash) ? hash : "overview";
+  }, []);
+
+  const [activeTab, setActiveTab] = React.useState(getTabFromHash);
+  const [copiedMint, setCopiedMint] = React.useState(false);
+
+  React.useEffect(() => {
+    function handleHashChange() {
+      setActiveTab(getTabFromHash());
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [getTabFromHash]);
+
+  function selectTab(id) {
+    setActiveTab(id);
+    if (typeof window !== "undefined" && window.history?.replaceState) {
+      window.history.replaceState(null, "", `#${id}`);
+    }
+  }
+
+  function copyMint() {
+    if (!dbc.mint) return;
+    navigator.clipboard?.writeText(dbc.mint).then(() => {
+      setCopiedMint(true);
+      setTimeout(() => setCopiedMint(false), 1400);
+    });
+  }
+
+  const tradeCount = (dbc.activity?.trackedBuys ?? 0) + (dbc.activity?.trackedSells ?? 0);
+
+  const tabs = [
+    { id: "overview", label: "Overview & Curve", icon: "📊" },
+    { id: "liquidity", label: "Liquidity · DLMM", icon: "💧", badge: dbc.dlmm?.pool ? "Linked" : null },
+    { id: "conviction", label: "Conviction", icon: "🛡️", badge: "2 Checks" },
+    { id: "activity", label: "Activity", icon: "⚡", badge: tradeCount > 0 ? String(tradeCount) : null },
+  ];
+
+  return (
+    <div className="page">
+      {/* Header Banner */}
+      <div className="token-header-banner">
+        <div>
+          <Link href="/launches" style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+            ← All launches
+          </Link>
+          <div className="token-meta-title">
+            <TokenIcon symbol={dbc.symbol} size={52} imageUrl={launch.image} rounded={14} />
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>{launch.name}</h1>
+                <span className={`status-pill ${isMigrated ? "completed" : "progress"}`}>{status}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, color: "var(--ink-dim)" }}>${dbc.symbol}</span>
+                <span>•</span>
+                <span>Meteora DBC</span>
+                <span>•</span>
+                <span style={{ textTransform: "capitalize" }}>{dbc.cluster}</span>
+                {dbc.mint && (
+                  <>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={copyMint}
+                      className="copy-chip-btn"
+                      title="Copy Token Mint Address"
+                    >
+                      <span>Mint: {shortAddress(dbc.mint)}</span>
+                      <span>{copiedMint ? "✓" : "📋"}</span>
+                    </button>
+                    <a
+                      href={explorer("address", dbc.mint)}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "var(--green)", fontSize: 12 }}
+                      title="Inspect mint on Solana Explorer"
+                    >
+                      ↗
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <a
+            href="#trade-panel"
+            className="btn primary mobile-only-trade-btn"
+            style={{ fontSize: 12, padding: "7px 14px", textDecoration: "none" }}
+            onClick={(e) => {
+              const el = document.getElementById("trade-panel");
+              if (el) {
+                e.preventDefault();
+                el.scrollIntoView({ behavior: "smooth" });
+              }
+            }}
+          >
+            ⚡ Trade
+          </a>
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ fontSize: 12, padding: "7px 14px" }}
+            onClick={() => refreshRegistry({ force: true })}
+          >
+            ↻ Refresh chain
+          </button>
+        </div>
+      </div>
+
+      {dbc.liveError && (
+        <div className="card" style={{ padding: 14, color: "#9f1239", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+          <span>{friendlyError(dbc.liveError, "data")}{dbc.liveStatus && dbc.liveCheckedAt ? ` Last verified ${new Date(dbc.liveCheckedAt).toLocaleTimeString()}; figures below may be outdated.` : ""}</span>
+          <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
+        </div>
+      )}
+
+      <LaunchOperatorGuide launch={launch} onSelectTab={selectTab} />
+
+      {/* Modern Two-Column DEX Terminal Layout */}
+      <div className="token-terminal-layout">
+        {/* Left Column: Contextual Tabbed Content */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}>
+          {/* Tabs */}
+          <div className="tab-nav-bar">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`tab-nav-btn${activeTab === tab.id ? " active" : ""}`}
+                onClick={() => selectTab(tab.id)}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+                {tab.badge && <span className="tab-nav-badge">{tab.badge}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* TAB 1: OVERVIEW */}
+          {activeTab === "overview" && (
+            <>
+              {/* Curve Progress & Economics Card */}
+              <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18 }}>Graduation Progress</h3>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                      Dynamic Bonding Curve to DAMM v2 Migration
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Geist Mono', monospace", color: "var(--ink)" }}>
+                      {Number.isFinite(progress) ? `${progress.toFixed(2)}%` : "0.00%"}
+                    </span>
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                      {raisedSol.toFixed(4)} / {targetSol === null ? "—" : `${targetSol} SOL`}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ height: 12, background: "var(--card-muted)", borderRadius: 999, overflow: "hidden", border: "1px solid var(--line)" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.max(0, Math.min(100, progress || 0))}%`,
+                        background: "linear-gradient(90deg, #635bff, #ec4899)",
+                        borderRadius: 999,
+                        transition: "width 400ms ease",
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--muted)", marginTop: 8 }}>
+                    <span>Target: {targetSol === null ? "—" : `${targetSol} SOL`}</span>
+                    <span>Destination: Meteora DAMM v2</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+                  <StatTile label="DBC Fee" value={terms.curveFeeBps === undefined ? "—" : `${terms.curveFeeBps / 100}%`} sub="Trading fee" />
+                  <StatTile label="DAMM v2 Fee" value={terms.migratedPoolFeeBps === undefined ? "—" : `${terms.migratedPoolFeeBps / 100}%`} sub="AMM post-migration" />
+                  <StatTile label="Permanent Lock" value={`${terms.creatorPermanentLockedLiquidityPercentage ?? 0}%`} sub="Creator LP locked" />
+                  <StatTile label="Creator Liquidity" value={`${terms.creatorLiquidityPercentage ?? 0}%`} sub="Unlocked at migration" />
+                </div>
+              </div>
+
+              {/* On-Chain Record Card */}
+              <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3 style={{ margin: 0, fontSize: 16 }}>On-Chain Launch Record</h3>
+                  {dbc.uri && (
+                    <a href={dbc.uri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--green)", fontWeight: 600 }}>
+                      Token Metadata JSON ↗
+                    </a>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <OnchainRow label="Token Mint" address={dbc.mint} kind="address" explorer={explorer} />
+                  <OnchainRow label="DBC Pool" address={dbc.pool} kind="address" explorer={explorer} />
+                  <OnchainRow label="Config" address={dbc.config} kind="address" explorer={explorer} />
+                  <OnchainRow label="Creator" address={launch.creator} kind="address" explorer={explorer} />
+                  {terms.feeClaimer && <OnchainRow label="Fee Claimer" address={terms.feeClaimer} kind="address" explorer={explorer} />}
+                  {terms.leftoverReceiver && <OnchainRow label="Leftover Receiver" address={terms.leftoverReceiver} kind="address" explorer={explorer} />}
+                  {dbc.signature && <OnchainRow label="Launch Transaction" address={dbc.signature} kind="tx" explorer={explorer} />}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
+                  Launch terms are checked against Solana devnet accounts. Open the links to inspect the records.
+                </div>
+              </div>
+
+              {/* Migration Lifecycle Card */}
+              <MeteoraMigrationCard launch={launch} explorer={explorer} />
+            </>
+          )}
+
+          {/* TAB 2: LIQUIDITY (DLMM) */}
+          {activeTab === "liquidity" && (
+            <div>
+              {chain?.dammV2?.verified ? (
+                <DlmmLiquidityCard launch={launch} explorer={explorer} />
+              ) : (
+                <div className="card" style={{ padding: 36, textAlign: "center" }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>💧</div>
+                  <h3 style={{ margin: 0, fontSize: 18 }}>DLMM Liquidity Market</h3>
+                  <div style={{ maxWidth: 460, margin: "10px auto 0", fontSize: 13, color: "var(--ink-dim)", lineHeight: 1.6 }}>
+                    Concentrated DLMM liquidity opens after the Dynamic Bonding Curve reaches 100% of its target ({targetSol} SOL) and migrates to DAMM v2.
+                  </div>
+                  <div style={{ marginTop: 20 }}>
+                    <button type="button" className="btn ghost" onClick={() => selectTab("overview")}>
+                      View Curve Progress →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: CONVICTION */}
+          {activeTab === "conviction" && (
+            <ConvictionProofCard launch={launch} explorer={explorer} />
+          )}
+
+          {/* TAB 4: ACTIVITY */}
+          {activeTab === "activity" && (
+            <DbcActivityCard launch={launch} explorer={explorer} />
+          )}
+        </div>
+
+        {/* Right Column: Sticky Action & Trade Terminal */}
+        <div id="trade-panel" className="terminal-sticky-panel">
+          <MeteoraTradeCard key={dbc.pool} launch={launch} explorer={explorer} onSelectTab={selectTab} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TokenDetailPage({ sym }) {
-  const { registry } = useRegistry();
+  const { registry, source, loading, error } = useRegistry();
   const wallet = useWallet();
   const [now, setNow] = React.useState(() => new Date());
 
@@ -497,20 +1572,29 @@ export default function TokenDetailPage({ sym }) {
   const launch = (registry.launches || []).find((l) => l.sym === sym);
 
   if (!launch) {
+    const waitingForRegistry = source === "static" || (loading && source !== "api");
+    const registryUnavailable = source === "offline" && !loading;
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h1>Token not found</h1>
-            <div className="sub">No launch with symbol ${sym} in the local registry.</div>
+            <h1>{waitingForRegistry ? "Loading launch…" : registryUnavailable ? "Launches are temporarily unavailable" : "Launch not found"}</h1>
+            <div className="sub">{waitingForRegistry
+              ? "Checking the latest launches."
+              : registryUnavailable
+                ? friendlyError(error, "data")
+                : "We couldn't find this launch. Check the link or explore all launches."}</div>
           </div>
         </div>
         <div>
-          <Link href="/launches" className="btn ghost">← Back to launches</Link>
+          {registryUnavailable && <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Try again</button>}
+          {!waitingForRegistry && <Link href="/launches" className="btn ghost">← All launches</Link>}
         </div>
       </div>
     );
   }
+
+  if (launch.dbc) return <MeteoraTokenDetailPage launch={launch} />;
 
   const events = (registry.eventReceipts || []).filter((ev) => String(ev.token || "").toUpperCase() === sym).slice(0, 12);
   const buyEvents = events.filter((ev) => ev.type === "buy_completed" || ev.type === "first_buy_completed");
