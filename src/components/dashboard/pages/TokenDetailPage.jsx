@@ -1233,6 +1233,53 @@ function MeteoraMigrationCard({ launch, explorer }) {
   );
 }
 
+function LaunchOperatorGuide({ launch, onSelectTab }) {
+  const [report, setReport] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+  const [refresh, setRefresh] = React.useState(0);
+
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getJson(`/api/operator/launches/${encodeURIComponent(launch.sym)}/report`)
+      .then((data) => { if (active) { setReport(data); setError(""); } })
+      .catch(() => { if (active) setError("The latest launch guidance is unavailable. Try again in a moment."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [launch.sym, refresh]);
+
+  return (
+    <section className="card operator-guide" aria-label="Launch Operator guidance">
+      <div className="operator-guide-head">
+        <div>
+          <div className="operator-eyebrow">Launch Operator</div>
+          <h3>What comes next?</h3>
+        </div>
+        <button type="button" className="btn ghost" onClick={() => setRefresh((value) => value + 1)} disabled={loading}>{loading ? "Checking…" : "Refresh guidance"}</button>
+      </div>
+      {error && <div className="operator-notice error" role="alert">{error}</div>}
+      {report && (
+        <div className="operator-guide-content">
+          <div className="operator-guide-step">
+            <span className="operator-step-label">Next step</span>
+            <strong>{report.next.title}</strong>
+            <p>{report.next.detail}</p>
+            {report.chain.stale && <p>Chain information may be outdated. Refresh it before taking action.</p>}
+            <button type="button" className="btn primary" onClick={() => onSelectTab(report.next.anchor || "overview")}>Review {report.next.anchor === "liquidity" ? "liquidity" : "launch"} →</button>
+          </div>
+          <div className="operator-guide-facts">
+            <span><strong>{Number.isFinite(report.chain.progressPercent) ? `${report.chain.progressPercent.toFixed(2)}%` : "—"}</strong> toward graduation</span>
+            <span><strong>{report.activity.available ? report.activity.trackedBuys + report.activity.trackedSells : "—"}</strong> verified submitted trades</span>
+            <span><strong>{report.liquidity.linked ? "Linked" : "Not linked"}</strong> DLMM market</span>
+          </div>
+        </div>
+      )}
+      <small>Guidance is based on registered launches, verified activity, and current pool reads. Wallet actions always require your review and signature.</small>
+    </section>
+  );
+}
+
 function MeteoraTokenDetailPage({ launch }) {
   const dbc = launch.dbc;
   const chain = dbc.liveStatus;
@@ -1370,6 +1417,8 @@ function MeteoraTokenDetailPage({ launch }) {
           <button type="button" className="btn ghost" onClick={() => refreshRegistry({ force: true })}>Retry status</button>
         </div>
       )}
+
+      <LaunchOperatorGuide launch={launch} onSelectTab={selectTab} />
 
       {/* Modern Two-Column DEX Terminal Layout */}
       <div className="token-terminal-layout">

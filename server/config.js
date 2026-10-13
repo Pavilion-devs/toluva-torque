@@ -83,7 +83,18 @@ export const config = {
     publicBaseUrl: firstSet(process.env.TOLUVA_METADATA_PUBLIC_BASE_URL),
     verifyBaseUrl: firstSet(process.env.TOLUVA_METADATA_VERIFY_BASE_URL),
   },
+  operator: {
+    openaiApiKey: firstSet(process.env.OPENAI_API_KEY),
+    model: firstSet(process.env.TOLUVA_OPERATOR_MODEL, "gpt-5-mini"),
+    maxDraftsPerHour: numberFromEnv(process.env.TOLUVA_OPERATOR_MAX_DRAFTS_PER_HOUR, 30),
+    publicOrigin: firstSet(process.env.TOLUVA_PUBLIC_ORIGIN),
+  },
 };
+
+if (!config.operator.publicOrigin && config.metadata.publicBaseUrl) {
+  try { config.operator.publicOrigin = new URL(config.metadata.publicBaseUrl).origin; }
+  catch { /* Metadata configuration validation reports its own error. */ }
+}
 
 const raydiumCluster = normalizedCluster(firstSet(process.env.RAYDIUM_CLUSTER, config.solana.cluster));
 

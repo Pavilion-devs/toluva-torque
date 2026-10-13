@@ -3,7 +3,7 @@ import Link, { navigate } from "../Link";
 import { TokenIcon } from "../tokenIcons";
 import useWallet from "../useWallet";
 import { getLaunchFilters, refreshRegistry, useRegistry } from "../../../lib/launchRegistry";
-import { getJson } from "../../../lib/toluvaApi";
+import { getJson, postJson } from "../../../lib/toluvaApi";
 import { friendlyError } from "../../../lib/userErrors";
 
 const statusMap = {
@@ -284,15 +284,19 @@ const monoInputStyle = { ...inputStyle, fontFamily: "'Geist Mono', monospace" };
 
 // ─── launch form (modal body) ─────────────────────────────────────────────────
 
-function NewLaunchForm({ wallet, onClose, onLaunched }) {
+function NewLaunchForm({ wallet, onClose, onLaunched, initialDraft }) {
   const [form, setForm] = React.useState(() => ({
-    name: "",
-    symbol: "",
-    description: "",
+    name: initialDraft?.name || "",
+    symbol: initialDraft?.symbol || "",
+    description: initialDraft?.description || "",
     imageDataUrl: null,
     uri: "",
-    migrationThresholdSol: "5",
+    migrationThresholdSol: initialDraft?.migrationThresholdSol || "5",
   }));
+  const [operatorPrompt, setOperatorPrompt] = React.useState("");
+  const [operatorResult, setOperatorResult] = React.useState(null);
+  const [operatorBusy, setOperatorBusy] = React.useState(false);
+  const [operatorError, setOperatorError] = React.useState("");
   const [terms, setTerms] = React.useState(null);
   const [hosting, setHosting] = React.useState(null);
   const [metadataMode, setMetadataMode] = React.useState("hosted");
@@ -367,6 +371,33 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
 
   function savePending(next) {
     setPending({ ...next, draftKey });
+  }
+
+  async function prepareOperatorDraft() {
+    setOperatorBusy(true);
+    setOperatorError("");
+    setOperatorResult(null);
+    try {
+      const result = await postJson("/api/operator/draft", { prompt: operatorPrompt });
+      setOperatorResult(result);
+    } catch (error) {
+      setOperatorError(error?.payload?.error || "The launch draft could not be prepared. Please try again or use the form below.");
+    } finally {
+      setOperatorBusy(false);
+    }
+  }
+
+  function useOperatorDraft() {
+    if (!operatorResult || operatorResult.unsupportedRequests?.length || activePending?.config || activePending?.proof) return;
+    setForm((current) => ({ ...current,
+      name: operatorResult.draft.name || current.name,
+      symbol: operatorResult.draft.symbol || current.symbol,
+      description: operatorResult.draft.description || current.description,
+      migrationThresholdSol: operatorResult.draft.migrationThresholdSol,
+      uri: activePending?.hostedMetadata?.uri === current.uri ? "" : current.uri,
+    }));
+    if (activePending?.hostedMetadata) setPending((current) => ({ ...current, hostedMetadata: null }));
+    setOperatorResult(null);
   }
 
   async function submit(e) {
@@ -462,6 +493,40 @@ function NewLaunchForm({ wallet, onClose, onLaunched }) {
 
       <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <section className="operator-draft-panel" aria-label="Launch Operator">
+            <div className="operator-eyebrow">Launch Operator</div>
+            <h4>Describe your launch</h4>
+            <p>Turn an idea into an editable Conviction v1 plan. You review the terms and approve every wallet step.</p>
+            <textarea
+              value={operatorPrompt}
+              onChange={(event) => setOperatorPrompt(event.target.value)}
+              maxLength={500}
+              rows={3}
+              disabled={operatorBusy || state.status === "submitting" || Boolean(activePending?.config)}
+              placeholder="Launch a token called Aurora with symbol AURA and a 5 SOL graduation target…"
+              style={{ ...inputStyle, resize: "vertical" }}
+            />
+            <div className="operator-draft-actions">
+              <span>{operatorPrompt.length}/500 · Your description is sent to the AI provider when AI drafting is available.</span>
+              <button type="button" className="btn ghost" onClick={prepareOperatorDraft} disabled={operatorBusy || state.status === "submitting" || Boolean(activePending?.config) || operatorPrompt.trim().length < 12}>
+                {operatorBusy ? "Preparing…" : "Prepare draft"}
+              </button>
+            </div>
+            {activePending?.config && <p>A launch is already in progress. Complete it before preparing another draft.</p>}
+            {operatorError && <div className="operator-notice error" role="alert">{operatorError}</div>}
+            {operatorResult && (
+              <div className="operator-result">
+                <strong>{operatorResult.mode === "ai" ? "AI prepared draft" : "Guided draft"}</strong>
+                <span>{operatorResult.draft.name || "Name needed"} · {operatorResult.draft.symbol || "Symbol needed"} · {operatorResult.draft.migrationThresholdSol} SOL target</span>
+                <span>Fixed terms: 1% DBC fee · 0.3% DAMM v2 fee · 50% permanent liquidity lock · SOL quote on devnet.</span>
+                {operatorResult.missing?.length > 0 && <span>Still needed: {operatorResult.missing.join(", ")}.</span>}
+                {operatorResult.assumptions?.map((item) => <span key={item}>{item}</span>)}
+                {operatorResult.unsupportedRequests?.length > 0 && <div className="operator-notice error">This request includes unsupported terms: {operatorResult.unsupportedRequests.join(" ")} Please revise your description.</div>}
+                <button type="button" className="btn primary" onClick={useOperatorDraft} disabled={operatorResult.unsupportedRequests?.length > 0}>Use this draft</button>
+                <small>No token or transaction has been created.</small>
+              </div>
+            )}
+          </section>
           <Field label="Token name">
             <input value={form.name} onChange={update("name")} maxLength={32} disabled={state.status === "submitting"} placeholder="Your token name" style={inputStyle} />
           </Field>
@@ -780,7 +845,18 @@ export default function LaunchesPage() {
   const wallet = useWallet();
   const launches = (registry.launches || []).filter((launch) => launch.dbc?.pool);
   const [filter, setFilter] = React.useState("all");
-  const [showLaunchModal, setShowLaunchModal] = React.useState(false);
+  const [handoffDraft] = React.useState(() => {
+    if (typeof window === "undefined") return null;
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("operator") !== "1") return null;
+    const name = (query.get("name") || "").slice(0, 32);
+    const symbol = (query.get("symbol") || "").slice(0, 10).toUpperCase();
+    const target = Number(query.get("targetSol"));
+    return { name, symbol: /^[A-Z0-9]{2,10}$/.test(symbol) ? symbol : "",
+      description: (query.get("description") || "").slice(0, 280),
+      migrationThresholdSol: Number.isFinite(target) && target >= 1 && target <= 100 ? String(target) : "5" };
+  });
+  const [showLaunchModal, setShowLaunchModal] = React.useState(Boolean(handoffDraft));
   const filters = getLaunchFilters({ ...registry, launches });
   const visible = launches.filter((l) => filter === "all" || l.status === filter);
 
@@ -807,6 +883,7 @@ export default function LaunchesPage() {
         <Modal onClose={() => setShowLaunchModal(false)}>
           <NewLaunchForm
             wallet={wallet}
+            initialDraft={handoffDraft}
             onClose={() => setShowLaunchModal(false)}
             onLaunched={(result) => {
               setFilter("all");

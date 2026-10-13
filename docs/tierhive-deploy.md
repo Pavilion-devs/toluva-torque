@@ -30,9 +30,16 @@ TOLUVA_REGISTRY_PATH=/var/lib/toluva/registry/registry.json
 TOLUVA_METADATA_DIR=/var/lib/toluva/metadata
 TOLUVA_METADATA_PUBLIC_BASE_URL=https://YOUR_DEVNET_HOST
 TOLUVA_METADATA_VERIFY_BASE_URL=http://toluva-web/metadata
+# Optional Launch Operator AI. Add only to this root-owned server environment file.
+OPENAI_API_KEY=YOUR_SERVER_SIDE_KEY
+TOLUVA_OPERATOR_MODEL=gpt-5-mini
+TOLUVA_OPERATOR_MAX_DRAFTS_PER_HOUR=30
+TOLUVA_PUBLIC_ORIGIN=https://YOUR_DEVNET_HOST
 ```
 
 The optional verification base makes the API read each newly stored asset through the internal web proxy when the VPS cannot connect back to its own public IP. Returned token and image URIs still use the public HTTPS base; verify those URLs externally before accepting launches. Use a dependable server-side RPC for the public trial if the shared devnet endpoint becomes unreliable. Give `/var/lib/toluva` to the container's unprivileged Node user and restrict the environment file to root. Configure the TierHive HAProxy domain to route to the VPS private address and port `3013`, then validate DNS and issue SSL. The hostname must remain live once token metadata URIs are written on chain.
+
+The web Caddyfile also proxies `/mcp` to the API. It exposes only public read-only data tools and an unsigned launch-plan handoff. Run the [Launch Operator checks](launch-operator.md) after updating both the API image and Caddy configuration.
 
 ## Acceptance checks
 

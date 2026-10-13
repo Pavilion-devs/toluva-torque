@@ -48,9 +48,42 @@ import {
   buildDlmmPoolTransaction, buildDlmmPositionTransaction, buildDlmmWithdrawalTransactions, createDlmmLinkChallenge,
   getDlmmPlan, getLinkedDlmmStatus, verifyDlmmLinkAuthorization,
 } from "./services/meteora-dlmm.js";
+import {
+  draftLaunchFromPrompt, operatorAvailability, operatorLaunchReport, operatorLaunchTerms,
+} from "./services/launch-operator.js";
+import { handleToluvaMcp } from "./services/toluva-mcp.js";
 
 const port = config.api.port;
 const allowedOrigin = config.api.allowedOrigin;
+const operatorDraftAttempts = new Map();
+let operatorDraftsThisHour = { start: Date.now(), count: 0 };
+
+function checkOperatorDraftBudget(req) {
+  const now = Date.now();
+  if (now - operatorDraftsThisHour.start >= 3_600_000) operatorDraftsThisHour = { start: now, count: 0 };
+  if (operatorDraftsThisHour.count >= config.operator.maxDraftsPerHour) {
+    const error = new Error("AI drafting is busy right now. Please use the launch form directly.");
+    error.status = 429;
+    throw error;
+  }
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const address = forwarded || req.socket.remoteAddress || "unknown";
+  const current = operatorDraftAttempts.get(address);
+  const entry = !current || now - current.start >= 60_000 ? { start: now, count: 0 } : current;
+  if (entry.count >= 3) {
+    const error = new Error("Please wait a minute before requesting another AI draft.");
+    error.status = 429;
+    throw error;
+  }
+  entry.count += 1;
+  operatorDraftAttempts.set(address, entry);
+  operatorDraftsThisHour.count += 1;
+  if (operatorDraftAttempts.size > 1000) {
+    for (const [key, value] of operatorDraftAttempts) {
+      if (now - value.start >= 60_000) operatorDraftAttempts.delete(key);
+    }
+  }
+}
 
 function livePoolError(error) {
   const message = error?.message || "";
@@ -66,7 +99,7 @@ function sendJson(res, status, body) {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, MCP-Protocol-Version, MCP-Session-Id",
   });
   res.end(JSON.stringify(body, null, 2));
 }
@@ -210,6 +243,10 @@ const server = http.createServer(async (req, res) => {
   const pathname = routePath(req);
 
   try {
+    if (pathname === "/mcp") {
+      await handleToluvaMcp(req, res);
+      return;
+    }
     const metadataAsset = pathname.match(/^\/metadata\/(images\/[a-f0-9]{64}\.jpg|tokens\/[a-f0-9]{64}\.json)$/);
     if (req.method === "GET" && metadataAsset) {
       const asset = await readLocalMetadataAsset(metadataAsset[1]);
@@ -257,6 +294,25 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && pathname === "/api/registry") {
       sendJson(res, 200, await registryWithLivePoolState());
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/operator/availability") {
+      sendJson(res, 200, { operator: operatorAvailability() });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/operator/draft") {
+      if (config.operator.openaiApiKey) checkOperatorDraftBudget(req);
+      sendJson(res, 200, await draftLaunchFromPrompt(await readBody(req, 2048)));
+      return;
+    }
+
+    const operatorRead = pathname.match(/^\/api\/operator\/launches\/([^/]+)\/(report|terms)$/);
+    if (req.method === "GET" && operatorRead) {
+      const launchId = decodeURIComponent(operatorRead[1]);
+      sendJson(res, 200, operatorRead[2] === "report"
+        ? await operatorLaunchReport(launchId) : await operatorLaunchTerms(launchId));
       return;
     }
 
