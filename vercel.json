@@ -1,8 +1,15 @@
 {
-  "rewrites": [
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
     {
-      "source": "/((?!assets/|api/|favicon.ico).*)",
-      "destination": "/index.html"
+      "source": "/",
+      "destination": "https://devnet.toluva.xyz/",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "destination": "https://devnet.toluva.xyz/:path*",
+      "permanent": false
     }
   ]
 }

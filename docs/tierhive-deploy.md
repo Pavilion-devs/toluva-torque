@@ -2,6 +2,8 @@
 
 The shared TierHive VPS already runs other services. Toluva uses its own Docker network, containers, data directory, and private backend port. TierHive HAProxy provides the public HTTPS hostname and forwards to the web container at the VPS private address on port `3013`. The web container serves the built React app and proxies `/api/*` and `/metadata/*` to the Node API; the API has no host port mapping.
 
+The repository's earlier Vercel project still owns `toluva.xyz` and tracks `main`. Its `vercel.json` temporarily redirects that hostname and all paths to `devnet.toluva.xyz`. This prevents Vercel from serving a static frontend without Toluva's API. Revisit the domain plan before a mainnet release.
+
 ## Layout
 
 | Path or name | Purpose |
