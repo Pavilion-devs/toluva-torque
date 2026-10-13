@@ -10,7 +10,7 @@
 
 Toluva is a self-service token launch and liquidity experience built on Meteora. A creator launches through **Dynamic Bonding Curve (DBC)**, the token can graduate into **DAMM v2**, and the creator can open an optional **DLMM** market for wallet-owned liquidity positions. The app keeps the launch terms, live pool state, verified activity, and next step visible throughout that journey.
 
-**Status:** the product is live on **Solana devnet** at [devnet.toluva.xyz](https://devnet.toluva.xyz). Mainnet is a release goal, not a current deployment.
+**Status:** the product is live on **Solana devnet** at [devnet.toluva.xyz](https://devnet.toluva.xyz). The legacy `toluva.xyz` hostname forwards to the same devnet app. Mainnet is a release goal, not a current deployment.
 
 ## Table of contents
 
